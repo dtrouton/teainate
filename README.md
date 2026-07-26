@@ -101,3 +101,9 @@ The integration tests in `Tests/TeainateIntegrationTests` spawn and terminate re
 `caffeinate` processes and read real `pmset` state, so they are slower and less
 hermetic than `TeainateCoreTests`. That is also why they live in a separate test
 target.
+
+Known limitations and planned work are in [`docs/followups.md`](docs/followups.md).
+
+## License
+
+MIT — see [LICENSE](LICENSE).
