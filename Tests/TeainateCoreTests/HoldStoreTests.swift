@@ -87,6 +87,26 @@ private func tempFile() -> URL {
     #expect(FileManager.default.fileExists(atPath: backup.path))
 }
 
+@Test func realSpawnedCaffeinateSurvivesReconciliation() throws {
+    // Regression test: SystemCaffeinateSpawner execs /usr/bin/caffeinate by absolute
+    // path, and `ps -o comm=` reports the executable's path (truncated to its column
+    // width) rather than the bare process name for such processes. If the snapshotter
+    // ever reads that field instead of `ucomm=`, reconcile's `command == "caffeinate"`
+    // check silently fails and every hold we spawn is dropped on the very next read —
+    // while the caffeinate process itself keeps running. Fakes can't catch this because
+    // they hardcode `command: "caffeinate"`; this test exercises the real spawner and
+    // real `ps` together, exactly like reconcile does in production.
+    let spawner = SystemCaffeinateSpawner()
+    let pid = try spawner.spawn(flags: ["-i", "-t", "30"])
+    defer { spawner.terminate(pid: pid) }
+
+    let snapshot = try PSProcessSnapshotter().snapshot()
+    #expect(snapshot[pid]?.command == "caffeinate")
+
+    let kept = reconcile([hold("a", pid: pid)], against: snapshot)
+    #expect(kept.map(\.id) == ["a"])
+}
+
 @Test func concurrentMutationsDoNotLoseWrites() async throws {
     let url = tempFile()
     var live: [pid_t: ProcessSnapshot] = [:]
