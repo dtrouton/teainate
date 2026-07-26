@@ -27,7 +27,7 @@ final class MenuRenderer {
             )
             menuItem.target = self
             menuItem.tag = index
-            menuItem.isEnabled = item.isEnabled && item.action != .none
+            menuItem.isEnabled = item.isEnabled
             menuItem.state = item.isChecked ? .on : .off
             menuItem.indentationLevel = item.indent
             actions[index] = item.action

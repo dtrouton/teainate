@@ -92,9 +92,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             this Mac awake.
             """
         alert.alertStyle = .warning
-        alert.addButton(withTitle: "Release")
+        // Cancel is first (= Return-key default); Release carries no key equivalent at
+        // all, so a reflexive Enter can never terminate processes teainate didn't start.
         alert.addButton(withTitle: "Cancel")
-        guard alert.runModal() == .alertFirstButtonReturn else { return }
+        alert.addButton(withTitle: "Release")
+        alert.buttons[0].keyEquivalent = "\r"
+        alert.buttons[1].keyEquivalent = ""
+        guard alert.runModal() == .alertSecondButtonReturn else { return }
 
         _ = try? service.reclaimUntracked()
     }

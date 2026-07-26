@@ -144,6 +144,33 @@ private func titles(_ items: [MenuItem]) -> [String] {
     #expect(item.isEnabled)
 }
 
+// MenuRenderer relies solely on `isEnabled` (no `action != .none` safety net of its own),
+// so this is the layer that must guarantee the model never emits an enabled-but-actionless
+// row — otherwise a future item would render as clickable but silently do nothing.
+@Test func actionlessItemsAreNeverEnabled() {
+    let statuses = [
+        status(),
+        status(holds: [holdStatus(id: "h_a"), holdStatus(id: "h_b")]),
+        status(foreign: [ForeignAssertion(pid: 640, process: "Claude", type: "NoIdleSleepAssertion")]),
+        status(untracked: [UntrackedCaffeinate(pid: 555, arguments: "caffeinate -i")]),
+        status(
+            holds: [holdStatus(id: "h_a")],
+            foreign: [ForeignAssertion(pid: 640, process: "Claude", type: "NoIdleSleepAssertion")],
+            untracked: [UntrackedCaffeinate(pid: 555, arguments: "caffeinate -i")]
+        ),
+    ]
+    let skillStates: [SkillInstallState] = [.notInstalled, .current, .stale("gone")]
+
+    for status in statuses {
+        for skillState in skillStates {
+            let items = buildMenu(status: status, preferences: MenuPreferences(), skillState: skillState)
+            for item in items where item.action == .none {
+                #expect(!item.isEnabled, "'\(item.title)' has action .none but isEnabled == true")
+            }
+        }
+    }
+}
+
 @Test func quitIsAlwaysLast() {
     let items = buildMenu(status: status(), preferences: MenuPreferences(), skillState: .current)
     #expect(items.last?.action == .quit)
