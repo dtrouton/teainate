@@ -154,6 +154,29 @@ private func liveTable(_ pids: pid_t...) -> [pid_t: ProcessSnapshot] {
     #expect(try service.status().holds.isEmpty)
 }
 
+// `off --id <unknown>` must be a failure the caller can act on: a forever hold
+// released under the wrong id would otherwise never be released by anything else.
+@Test func classifyOffReportsUnknownIDAsNotFound() {
+    let outcome = TeainateService.classifyOff(id: "h_missing", released: [])
+    #expect(outcome == .idNotFound("h_missing"))
+}
+
+// `off --all` over an empty set is a legitimate no-op, not a failure — there was
+// nothing to release and nothing was asked for by name.
+@Test func classifyOffReportsEmptyAllAsReleased() {
+    let outcome = TeainateService.classifyOff(id: nil, released: [])
+    #expect(outcome == .released([]))
+}
+
+@Test func classifyOffReportsMatchedIDAsReleased() throws {
+    let spawner = RecordingSpawner()
+    let service = makeService(spawner: spawner, snapshotter: StubSnapshotter(table: liveTable(100)))
+    let hold = try service.on(HoldOptions(source: .cli))
+    let released = try service.off(id: hold.id)
+
+    #expect(TeainateService.classifyOff(id: hold.id, released: released) == .released(released))
+}
+
 @Test func awakeReflectsWhetherHoldsExist() throws {
     let service = makeService(snapshotter: StubSnapshotter(table: liveTable(100)))
     #expect(try service.status().awake == false)

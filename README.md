@@ -82,6 +82,13 @@ executable's full path, which for a process launched by absolute path (as
 teainate launches `caffeinate`) truncates to something like `/usr/bin/caffein`
 and silently breaks name matching.
 
+On every read, teainate drops any recorded hold whose PID is gone or now belongs
+to a process that is not `caffeinate` — this is what makes the state file safe to
+trust after a crash. It does **not** protect against a PID being recycled by
+*another* `caffeinate` process (for example, a different Claude Code session's):
+that gets adopted as one of teainate's own. Closing that gap would mean also
+recording and matching each process's start time, which is not implemented.
+
 ## Development
 
 ```bash

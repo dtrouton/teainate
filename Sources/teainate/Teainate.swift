@@ -151,10 +151,15 @@ struct Off: ParsableCommand {
         }
 
         let released = try service.off(id: id)
-        if released.isEmpty {
-            print("No matching holds.")
-        } else {
-            print("Released \(released.count) hold\(released.count == 1 ? "" : "s").")
+        switch TeainateService.classifyOff(id: id, released: released) {
+        case .idNotFound(let id):
+            throw FriendlyError(description: "No hold with id '\(id)'.")
+        case .released(let released):
+            if released.isEmpty {
+                print("No matching holds.")
+            } else {
+                print("Released \(released.count) hold\(released.count == 1 ? "" : "s").")
+            }
         }
     }
 }

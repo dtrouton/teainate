@@ -5,6 +5,12 @@ public enum ServiceError: Error, Equatable {
     case spawnFailed(String)
 }
 
+/// See `TeainateService.classifyOff`.
+public enum OffOutcome: Equatable {
+    case released([Hold])
+    case idNotFound(String)
+}
+
 public struct HoldStatus: Codable, Sendable, Equatable {
     public let id: String
     public let kind: HoldKind
@@ -152,6 +158,19 @@ public struct TeainateService: Sendable {
             spawner.terminate(pid: hold.caffeinatePID)
         }
         return released
+    }
+
+    /// What an `off` call should report to the caller. `--all`'s empty result is a
+    /// legitimate no-op — releasing everything over an empty set genuinely succeeded.
+    /// `--id` naming a hold that was not released is not: the caller asked for a
+    /// specific hold, and if it was a `forever` hold, nothing will ever release it on
+    /// its own — no timer, no watched process — so a silent success here can leave the
+    /// Mac awake indefinitely.
+    public static func classifyOff(id: String?, released: [Hold]) -> OffOutcome {
+        if let id, released.isEmpty {
+            return .idNotFound(id)
+        }
+        return .released(released)
     }
 
     public func status() throws -> Status {

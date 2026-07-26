@@ -36,6 +36,22 @@ private func holdStatus(
     #expect(text.contains("42 min left"))
 }
 
+// 119 is deliberately not a multiple of 60: integer division would floor it to
+// "1 min left", which is off by nearly a full minute. It must round to 2.
+@Test func rendersRemainingTimeRoundedRatherThanFloored() {
+    let text = renderStatus(status(holds: [holdStatus(kind: .timer, remaining: 119)]))
+    #expect(text.contains("2 min left"))
+    #expect(!text.contains("1 min left"))
+}
+
+// Below one minute, "0 min left" reads as "your hold is spent" when up to 59
+// seconds actually remain.
+@Test func rendersSubMinuteRemainingAsLessThanAMinute() {
+    let text = renderStatus(status(holds: [holdStatus(kind: .timer, remaining: 30)]))
+    #expect(text.contains("less than a minute left"))
+    #expect(!text.contains("0 min left"))
+}
+
 @Test func rendersModifierFlags() {
     let text = renderStatus(status(holds: [holdStatus(display: true, acOnly: true)]))
     #expect(text.contains("display on"))
@@ -62,6 +78,10 @@ private func holdStatus(
     #expect(text.contains("not managed by teainate"))
     #expect(text.contains("caffeinate -i -t 300"))
     #expect(text.contains("555"))
+    // Must warn about the consequence, not invite the action: `off --untracked` can
+    // terminate another Claude Code session's real hold, so the hint must not read
+    // as a suggestion to run it.
+    #expect(text.contains("would terminate them"))
 }
 
 @Test func omitsUntrackedSectionWhenEmpty() {

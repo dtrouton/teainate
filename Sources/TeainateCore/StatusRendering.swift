@@ -28,7 +28,7 @@ public func renderStatus(_ status: Status) -> String {
         for process in status.untrackedCaffeinate {
             lines.append("  pid \(process.pid) — \(process.arguments)")
         }
-        lines.append("  (release with: teainate off --untracked)")
+        lines.append("  (not teainate's — \"teainate off --untracked\" would terminate them)")
     }
 
     return lines.joined(separator: "\n")
@@ -68,7 +68,8 @@ private func defaultLabel(for hold: HoldStatus) -> String {
         return "indefinitely"
     case .timer:
         guard let remaining = hold.remainingSeconds else { return "timed" }
-        return "\(remaining / 60) min left"
+        if remaining < 60 { return "less than a minute left" }
+        return "\(Int((Double(remaining) / 60).rounded())) min left"
     case .process:
         return "until session exits"
     }

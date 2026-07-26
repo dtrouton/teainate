@@ -4,9 +4,15 @@ public enum HoldStoreError: Error, Equatable {
     case lockTimeout
 }
 
-/// Drops holds whose caffeinate process is gone, or whose PID has been recycled by
-/// an unrelated process. This is what lets a plain file be a safe source of truth:
-/// a stale record can exist after a crash, but never survives the next read.
+/// Drops holds whose PID is gone, or now belongs to a process that is not `caffeinate`.
+/// This is what lets a plain file be a safe source of truth: a stale record can exist
+/// after a crash, but never survives the next read.
+///
+/// This does NOT protect against a PID being recycled by another `caffeinate` process —
+/// if a dead hold's PID is reused by an unrelated `caffeinate` (for example, another
+/// Claude Code session's), this adopts it as our own. Closing that gap would mean
+/// recording and matching the process's start time (`ps -o lstart=`) alongside the PID,
+/// which is not implemented here.
 public func reconcile(_ holds: [Hold], against table: [pid_t: ProcessSnapshot]) -> [Hold] {
     holds.filter { table[$0.caffeinatePID]?.command == "caffeinate" }
 }

@@ -72,6 +72,24 @@ private func titles(_ items: [MenuItem]) -> [String] {
     #expect(titles(items).first?.contains("42 min left") == true)
 }
 
+// 119 is not a multiple of 60: floor-division would read "1 min left" here, off by
+// nearly a full minute. The header must round instead.
+@Test func headerRoundsRemainingTimeRatherThanFlooring() {
+    let items = buildMenu(
+        status: status(holds: [holdStatus(kind: .timer, remaining: 119)]),
+        preferences: MenuPreferences(), skillState: .current
+    )
+    #expect(titles(items).first?.contains("2 min left") == true)
+}
+
+@Test func headerShowsLessThanAMinuteBelowSixtySeconds() {
+    let items = buildMenu(
+        status: status(holds: [holdStatus(kind: .timer, remaining: 30)]),
+        preferences: MenuPreferences(), skillState: .current
+    )
+    #expect(titles(items).first?.contains("less than a minute left") == true)
+}
+
 @Test func headerSaysOffWhenIdle() {
     let items = buildMenu(status: status(), preferences: MenuPreferences(), skillState: .current)
     #expect(titles(items).first?.contains("Off") == true)
