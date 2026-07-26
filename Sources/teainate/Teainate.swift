@@ -71,6 +71,10 @@ struct On: ParsableCommand {
         if let text = `for` {
             do {
                 _ = try parseDuration(text)
+            } catch DurationParseError.tooLong {
+                throw ValidationError(
+                    "Duration '\(text)' is longer than the \(maxDurationDays) day maximum."
+                )
             } catch {
                 throw ValidationError(
                     "Invalid duration '\(text)'. Use 45m, 2h, or a bare number of minutes."
