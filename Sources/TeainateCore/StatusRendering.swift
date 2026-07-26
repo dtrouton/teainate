@@ -34,9 +34,20 @@ public func renderStatus(_ status: Status) -> String {
     return lines.joined(separator: "\n")
 }
 
+/// A one-line description of a hold.
+///
+/// A label never replaces the remaining time — "how much longer do I have?" is the
+/// question this tool exists to answer, so a labelled timer shows both:
+/// `build — 42 min left`.
 public func describe(_ hold: HoldStatus) -> String {
     var parts: [String] = []
-    parts.append(hold.label ?? defaultLabel(for: hold))
+
+    let lifetime = defaultLabel(for: hold)
+    if let label = hold.label {
+        parts.append(hold.kind == .forever ? label : "\(label) — \(lifetime)")
+    } else {
+        parts.append(lifetime)
+    }
 
     var modifiers: [String] = []
     if hold.display { modifiers.append("display on") }

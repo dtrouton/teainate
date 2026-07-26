@@ -67,3 +67,21 @@ private func holdStatus(
 @Test func omitsUntrackedSectionWhenEmpty() {
     #expect(!renderStatus(status()).contains("not managed by teainate"))
 }
+
+@Test func labelledTimerShowsBothLabelAndRemainingTime() {
+    let text = describe(holdStatus(kind: .timer, label: "build", remaining: 2520))
+    #expect(text.contains("build"))
+    #expect(text.contains("42 min left"))
+}
+
+@Test func labelledForeverHoldShowsLabelNotIndefinitely() {
+    let text = describe(holdStatus(kind: .forever, label: "focus time"))
+    #expect(text.contains("focus time"))
+    #expect(!text.contains("indefinitely"))
+}
+
+@Test func labelledSessionHoldShowsBothLabelAndLifetime() {
+    let text = describe(holdStatus(kind: .process, label: "pairing session"))
+    #expect(text.contains("pairing session"))
+    #expect(text.contains("until session exits"))
+}

@@ -33,6 +33,12 @@ struct StatusCommand: ParsableCommand {
     }
 }
 
+/// Renders as `Error: <description>` on stderr with a non-zero exit status —
+/// unlike CleanExit, which prints to stdout and exits 0.
+struct FriendlyError: Error, CustomStringConvertible {
+    let description: String
+}
+
 struct On: ParsableCommand {
     static let configuration = CommandConfiguration(
         abstract: "Start holding this Mac awake."
@@ -61,6 +67,16 @@ struct On: ParsableCommand {
         if lifetimes > 1 {
             throw ValidationError("Choose at most one of --for, --session, --until-pid.")
         }
+
+        if let text = `for` {
+            do {
+                _ = try parseDuration(text)
+            } catch {
+                throw ValidationError(
+                    "Invalid duration '\(text)'. Use 45m, 2h, or a bare number of minutes."
+                )
+            }
+        }
     }
 
     func run() throws {
@@ -71,8 +87,8 @@ struct On: ParsableCommand {
             do {
                 watched = try service.resolveSessionPID()
             } catch ServiceError.noClaudeAncestor {
-                throw CleanExit.message(
-                    "No Claude Code session found in this process tree. Use --for instead, e.g. teainate on --for 45m"
+                throw FriendlyError(
+                    description: "No Claude Code session found in this process tree. Use --for instead, e.g. teainate on --for 45m"
                 )
             }
         } else if let untilPid {
