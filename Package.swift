@@ -27,6 +27,7 @@ let package = Package(
             dependencies: ["TeainateCore"],
             resources: [.copy("Fixtures")]
         ),
+        .testTarget(name: "TeainateIntegrationTests", dependencies: ["TeainateCore"]),
     ],
     swiftLanguageModes: [.v6]
 )
