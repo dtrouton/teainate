@@ -19,11 +19,14 @@ state file locked prints `Error: lockTimeout`. `HoldStoreError` and `ServiceErro
 have no human-readable descriptions, so any error not specially caught surfaces as
 its Swift case name. Conform them to `CustomStringConvertible`.
 
-**Cap `--for`.** `teainate on --for 9223372036854775807` traps in
-`String(Int(duration))` with `Double value cannot be converted to Int`. It crashes
-*after* passing `On.validate()`, which is exactly where a trap should be
-impossible. Nothing is left behind — it traps before spawning — but reject
-anything beyond a sane bound (say 30 days) in `parseDuration` instead.
+**Make the duration overflow trap impossible, not merely unreachable.**
+`parseDuration` now caps at 30 days, so no CLI input can reach the
+`String(Int(duration))` conversion in `caffeinateFlags` with an unbounded value.
+But that conversion is still unguarded and `HoldOptions.duration` is a bare
+`TimeInterval?`, so a future caller constructing `HoldOptions` directly — a new
+menu duration picker, a test, programmatic use — could trap exactly as the CLI
+used to. Either bound it at the `caffeinateFlags` layer too, or give durations a
+type that cannot hold an out-of-range value.
 
 **Close the PID-recycling gap properly.** `reconcile` drops holds whose PID now
 belongs to a non-`caffeinate` process, but a PID recycled by *another*
@@ -62,6 +65,9 @@ README now describe the limitation accurately; this would remove it.
 - **The `"caffeinate"` literal is compared in three places.** One constant.
 - **A process-kind hold cannot say which process it is watching.** `watched_pid`
   is recorded but never surfaced, so "until session exits" is all the user gets.
+- **Long holds render in minutes.** A 30-day hold reads `43200 min left`.
+  `defaultLabel` should switch to hours and days past some threshold. Only
+  reachable from the CLI — the menu's longest preset is 4 hours.
 - **The spec says the skill ships in-repo at `skills/teainate/SKILL.md`.** It
   ships as a Swift string constant instead — a deliberate change (bundle-resource
   lookup differs between the CLI and the `.app`), but the spec was never updated.
