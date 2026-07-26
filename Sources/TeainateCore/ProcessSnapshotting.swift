@@ -55,6 +55,18 @@ public func parsePSOutput(_ text: String) -> [pid_t: ProcessSnapshot] {
     return table
 }
 
+/// The name a process is best identified by.
+///
+/// Prefers the basename of the first token of the command line, because a process's
+/// reported name is unreliable: the Claude Code CLI reports its *version* (`2.1.220`)
+/// as its name while its command line is plainly `claude`.
+public func identifyingName(of entry: ProcessSnapshot) -> String {
+    guard let first = entry.arguments.split(separator: " ").first, !first.isEmpty else {
+        return entry.command
+    }
+    return String(first.split(separator: "/").last ?? first)
+}
+
 /// Walks up the process tree looking for a named ancestor.
 /// Bounded so a corrupt or cyclic table cannot hang the caller.
 public func findAncestor(
@@ -66,7 +78,9 @@ public func findAncestor(
     var seen: Set<pid_t> = []
     while let entry = table[current], !seen.contains(current) {
         seen.insert(current)
-        if names.contains(entry.command) { return entry.pid }
+        if names.contains(identifyingName(of: entry)) || names.contains(entry.command) {
+            return entry.pid
+        }
         if entry.parentPID <= 1 { return nil }
         current = entry.parentPID
     }

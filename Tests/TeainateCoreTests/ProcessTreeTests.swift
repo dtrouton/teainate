@@ -76,3 +76,44 @@ private let sample = """
     let me = try #require(table[getpid()])
     #expect(!me.arguments.isEmpty)
 }
+
+@Test func findsClaudeAncestorWhenNameIsAVersionNumber() {
+    // Real shape observed on macOS: the Claude Code CLI reports its version as its
+    // process name; only the command line identifies it.
+    let table = parsePSOutput("""
+        25336  5302 zsh /bin/zsh -c source /Users/x/.claude/snapshot
+         5302   758 2.1.220 claude
+          758   751 zsh -/bin/zsh
+        """)
+    #expect(findAncestor(of: 25336, named: ["claude"], in: table) == 5302)
+}
+
+@Test func findsClaudeAncestorWithExtraArguments() {
+    let table = parsePSOutput("""
+        25336  5302 zsh /bin/zsh -c source /Users/x/.claude/snapshot
+         5302   758 2.1.220 claude --continue
+        """)
+    #expect(findAncestor(of: 25336, named: ["claude"], in: table) == 5302)
+}
+
+@Test func findsClaudeAncestorInvokedByFullPath() {
+    let table = parsePSOutput("""
+        25336  5302 zsh /bin/zsh -c source /Users/x/.claude/snapshot
+         5302   758 2.1.220 /usr/local/bin/claude
+        """)
+    #expect(findAncestor(of: 25336, named: ["claude"], in: table) == 5302)
+}
+
+@Test func identifyingNameFallsBackToCommandWhenArgumentsAreEmpty() {
+    let entry = ProcessSnapshot(pid: 1, parentPID: 0, command: "launchd", arguments: "")
+    #expect(identifyingName(of: entry) == "launchd")
+}
+
+@Test func doesNotMatchOnSubstringWithinArguments() {
+    // The word "claude" appears in the args, but the first token's basename is
+    // "node" — the match must be on the first token, not a substring search.
+    let table = parsePSOutput("""
+        25336      1 node node /path/claude-helper.js
+        """)
+    #expect(findAncestor(of: 25336, named: ["claude"], in: table) == nil)
+}
