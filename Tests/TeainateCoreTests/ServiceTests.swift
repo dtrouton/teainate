@@ -89,6 +89,40 @@ private func liveTable(_ pids: pid_t...) -> [pid_t: ProcessSnapshot] {
     #expect(try service.status().holds.isEmpty)
 }
 
+@Test func failedStoreWriteTerminatesSpawnedProcess() throws {
+    // Force HoldStore.mutate to fail on its first call (the one made from `on()`'s
+    // append) by making the store's own snapshotter throw once. The snapshotter
+    // succeeds on later calls, so we can still read the store afterward to confirm
+    // nothing was persisted.
+    final class FlakySnapshotter: ProcessSnapshotting, @unchecked Sendable {
+        var callCount = 0
+        let table: [pid_t: ProcessSnapshot]
+        init(table: [pid_t: ProcessSnapshot]) { self.table = table }
+        func snapshot() throws -> [pid_t: ProcessSnapshot] {
+            callCount += 1
+            if callCount == 1 { throw ServiceError.spawnFailed("store snapshot boom") }
+            return table
+        }
+    }
+
+    let flaky = FlakySnapshotter(table: liveTable(100))
+    let url = FileManager.default.temporaryDirectory
+        .appendingPathComponent("teainate-svc-\(UUID().uuidString)")
+        .appendingPathComponent("holds.json")
+    let spawner = RecordingSpawner()
+    let service = TeainateService(
+        store: HoldStore(fileURL: url, snapshotter: flaky),
+        spawner: spawner,
+        assertionReader: StubAssertions(),
+        snapshotter: StubSnapshotter(table: liveTable(100)),
+        now: { Date(timeIntervalSince1970: 1_000_000) }
+    )
+
+    #expect(throws: (any Error).self) { try service.on(HoldOptions(source: .cli)) }
+    #expect(spawner.terminated == [100])
+    #expect(try service.status().holds.isEmpty)
+}
+
 @Test func multipleHoldsCoexist() throws {
     let service = makeService(snapshotter: StubSnapshotter(table: liveTable(100, 101)))
     _ = try service.on(HoldOptions(source: .menu))

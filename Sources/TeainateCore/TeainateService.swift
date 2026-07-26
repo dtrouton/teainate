@@ -115,7 +115,13 @@ public struct TeainateService: Sendable {
             display: options.display,
             acOnly: options.acOnly
         )
-        try store.mutate { $0.append(hold) }
+        do {
+            try store.mutate { $0.append(hold) }
+        } catch {
+            // Never leave an untracked process holding the Mac awake.
+            spawner.terminate(pid: pid)
+            throw error
+        }
         return hold
     }
 
