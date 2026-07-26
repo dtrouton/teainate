@@ -39,21 +39,37 @@ public struct HoldStatus: Codable, Sendable, Equatable {
     }
 }
 
+public struct UntrackedCaffeinate: Codable, Sendable, Equatable {
+    public let pid: pid_t
+    public let arguments: String
+
+    public init(pid: pid_t, arguments: String) {
+        self.pid = pid
+        self.arguments = arguments
+    }
+}
+
 public struct Status: Codable, Sendable, Equatable {
     public let awake: Bool
     public let holds: [HoldStatus]
     public let foreignAssertions: [ForeignAssertion]
+    public let untrackedCaffeinate: [UntrackedCaffeinate]
 
     // Explicit public init: the app target constructs an empty Status as a fallback.
-    public init(awake: Bool, holds: [HoldStatus], foreignAssertions: [ForeignAssertion]) {
+    public init(
+        awake: Bool, holds: [HoldStatus], foreignAssertions: [ForeignAssertion],
+        untrackedCaffeinate: [UntrackedCaffeinate]
+    ) {
         self.awake = awake
         self.holds = holds
         self.foreignAssertions = foreignAssertions
+        self.untrackedCaffeinate = untrackedCaffeinate
     }
 
     enum CodingKeys: String, CodingKey {
         case awake, holds
         case foreignAssertions = "foreign_assertions"
+        case untrackedCaffeinate = "untracked_caffeinate"
     }
 
     public static var encoder: JSONEncoder {
@@ -144,6 +160,13 @@ public struct TeainateService: Sendable {
         // pmset failing must not hide our own holds.
         let foreign = (try? assertionReader.assertions()) ?? []
         let ours = Set(holds.map(\.caffeinatePID))
+        // A snapshot failure must not hide our own holds either — just leave the
+        // untracked list empty rather than throwing status() out entirely.
+        let table = (try? snapshotter.snapshot()) ?? [:]
+        let untracked = table.values
+            .filter { $0.command == "caffeinate" && !ours.contains($0.pid) }
+            .map { UntrackedCaffeinate(pid: $0.pid, arguments: $0.arguments) }
+            .sorted { $0.pid < $1.pid }
         return Status(
             awake: !holds.isEmpty,
             holds: holds.map { hold in
@@ -154,8 +177,22 @@ public struct TeainateService: Sendable {
                     display: hold.display, acOnly: hold.acOnly
                 )
             },
-            foreignAssertions: foreign.filter { !ours.contains($0.pid) }
+            foreignAssertions: foreign.filter { !ours.contains($0.pid) },
+            untrackedCaffeinate: untracked
         )
+    }
+
+    /// Terminates caffeinate processes teainate did not start.
+    ///
+    /// We cannot prove such a process is a leaked hold of ours rather than another
+    /// tool's — every caffeinate assertion is anonymous. This is therefore never
+    /// invoked by `off(id: nil)`; the caller must ask for it explicitly.
+    public func reclaimUntracked() throws -> [UntrackedCaffeinate] {
+        let untracked = try status().untrackedCaffeinate
+        for process in untracked {
+            spawner.terminate(pid: process.pid)
+        }
+        return untracked
     }
 
     /// Finds the long-lived `claude` ancestor of this process.

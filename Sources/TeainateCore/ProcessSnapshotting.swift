@@ -4,11 +4,15 @@ public struct ProcessSnapshot: Sendable, Equatable {
     public let pid: pid_t
     public let parentPID: pid_t
     public let command: String
+    /// Full command line, used to identify what kind of hold an untracked
+    /// caffeinate process represents. `pmset` cannot supply this.
+    public let arguments: String
 
-    public init(pid: pid_t, parentPID: pid_t, command: String) {
+    public init(pid: pid_t, parentPID: pid_t, command: String, arguments: String = "") {
         self.pid = pid
         self.parentPID = parentPID
         self.command = command
+        self.arguments = arguments
     }
 }
 
@@ -20,8 +24,8 @@ public enum ProcessSnapshotError: Error, Equatable {
     case psFailed(status: Int32)
 }
 
-/// Parses `ps -eo pid=,ppid=,comm=` output. Malformed lines are skipped rather than fatal —
-/// a single odd line must never blind us to the rest of the process table.
+/// Parses `ps -eo pid=,ppid=,comm=,args=` output. Malformed lines are skipped rather than
+/// fatal — a single odd line must never blind us to the rest of the process table.
 public func parsePSOutput(_ text: String) -> [pid_t: ProcessSnapshot] {
     var table: [pid_t: ProcessSnapshot] = [:]
     for line in text.split(separator: "\n") {
@@ -30,7 +34,10 @@ public func parsePSOutput(_ text: String) -> [pid_t: ProcessSnapshot] {
               let pid = pid_t(fields[0]),
               let ppid = pid_t(fields[1])
         else { continue }
-        table[pid] = ProcessSnapshot(pid: pid, parentPID: ppid, command: String(fields[2]))
+        table[pid] = ProcessSnapshot(
+            pid: pid, parentPID: ppid, command: String(fields[2]),
+            arguments: fields.dropFirst(3).joined(separator: " ")
+        )
     }
     return table
 }
@@ -59,7 +66,7 @@ public struct PSProcessSnapshotter: ProcessSnapshotting {
     public func snapshot() throws -> [pid_t: ProcessSnapshot] {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/bin/ps")
-        process.arguments = ["-eo", "pid=,ppid=,comm="]
+        process.arguments = ["-eo", "pid=,ppid=,comm=,args="]
         let pipe = Pipe()
         process.standardOutput = pipe
         process.standardError = FileHandle.nullDevice

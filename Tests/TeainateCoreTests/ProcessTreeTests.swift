@@ -58,3 +58,21 @@ private let sample = """
     let me = getpid()
     #expect(table[me] != nil)
 }
+
+@Test func parsesArgumentsAsWellAsCommand() {
+    let table = parsePSOutput("  6708  6707 caffeinate caffeinate -i -t 300")
+    #expect(table[6708]?.command == "caffeinate")
+    #expect(table[6708]?.arguments == "caffeinate -i -t 300")
+}
+
+@Test func argumentsAreEmptyWhenAbsent() {
+    let table = parsePSOutput("  6708  6707 caffeinate")
+    #expect(table[6708]?.command == "caffeinate")
+    #expect(table[6708]?.arguments == "")
+}
+
+@Test func realSnapshotCapturesArgumentsForThisProcess() throws {
+    let table = try PSProcessSnapshotter().snapshot()
+    let me = try #require(table[getpid()])
+    #expect(!me.arguments.isEmpty)
+}

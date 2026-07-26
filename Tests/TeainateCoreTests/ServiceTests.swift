@@ -202,6 +202,60 @@ private func liveTable(_ pids: pid_t...) -> [pid_t: ProcessSnapshot] {
     #expect(throws: ServiceError.noClaudeAncestor) { try service.resolveSessionPID() }
 }
 
+@Test func untrackedCaffeinateProcessesAreReported() throws {
+    var table = liveTable(100)                       // ours, once we take a hold
+    table[555] = ProcessSnapshot(pid: 555, parentPID: 1,
+                                 command: "caffeinate", arguments: "caffeinate -i")
+    let service = makeService(snapshotter: StubSnapshotter(table: table))
+    _ = try service.on(HoldOptions(source: .cli))    // spawns pid 100, tracked
+
+    let untracked = try service.status().untrackedCaffeinate
+    #expect(untracked.map(\.pid) == [555])
+    #expect(untracked.first?.arguments == "caffeinate -i")
+}
+
+@Test func ourOwnHoldsAreNotReportedAsUntracked() throws {
+    let service = makeService(snapshotter: StubSnapshotter(table: liveTable(100)))
+    _ = try service.on(HoldOptions(source: .cli))
+    #expect(try service.status().untrackedCaffeinate.isEmpty)
+}
+
+@Test func nonCaffeinateProcessesAreNeverUntracked() throws {
+    var table: [pid_t: ProcessSnapshot] = [:]
+    table[555] = ProcessSnapshot(pid: 555, parentPID: 1,
+                                 command: "Safari", arguments: "Safari")
+    let service = makeService(snapshotter: StubSnapshotter(table: table))
+    #expect(try service.status().untrackedCaffeinate.isEmpty)
+}
+
+@Test func reclaimTerminatesOnlyUntrackedProcesses() throws {
+    let spawner = RecordingSpawner()
+    var table = liveTable(100)
+    table[555] = ProcessSnapshot(pid: 555, parentPID: 1,
+                                 command: "caffeinate", arguments: "caffeinate -i")
+    let service = makeService(spawner: spawner, snapshotter: StubSnapshotter(table: table))
+    _ = try service.on(HoldOptions(source: .cli))    // ours: pid 100
+
+    let reclaimed = try service.reclaimUntracked()
+
+    #expect(reclaimed.map(\.pid) == [555])
+    #expect(spawner.terminated == [555])             // ours (100) untouched
+    #expect(try service.status().holds.count == 1)   // our hold survives
+}
+
+@Test func offAllNeverTouchesUntrackedProcesses() throws {
+    let spawner = RecordingSpawner()
+    var table = liveTable(100)
+    table[555] = ProcessSnapshot(pid: 555, parentPID: 1,
+                                 command: "caffeinate", arguments: "caffeinate -i")
+    let service = makeService(spawner: spawner, snapshotter: StubSnapshotter(table: table))
+    _ = try service.on(HoldOptions(source: .cli))
+
+    _ = try service.off(id: nil)
+
+    #expect(spawner.terminated == [100])             // never 555
+}
+
 @Test func statusEncodesSnakeCaseJSON() throws {
     let service = makeService(snapshotter: StubSnapshotter(table: liveTable(100)))
     _ = try service.on(HoldOptions(duration: 60, label: "test", source: .claude))
