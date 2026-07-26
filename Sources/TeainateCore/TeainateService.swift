@@ -188,11 +188,21 @@ public struct TeainateService: Sendable {
     /// tool's — every caffeinate assertion is anonymous. This is therefore never
     /// invoked by `off(id: nil)`; the caller must ask for it explicitly.
     public func reclaimUntracked() throws -> [UntrackedCaffeinate] {
-        let untracked = try status().untrackedCaffeinate
-        for process in untracked {
-            spawner.terminate(pid: process.pid)
+        let candidates = try status().untrackedCaffeinate
+
+        // Re-verify against a fresh snapshot immediately before signalling: a PID
+        // that exited between the two reads could have been recycled by an
+        // unrelated process, and this is the one path that terminates processes
+        // teainate did not start. This narrows the race window rather than closing
+        // it — a PID could in principle still be recycled between this re-check
+        // and the `kill` itself.
+        let current = (try? snapshotter.snapshot()) ?? [:]
+        var reclaimed: [UntrackedCaffeinate] = []
+        for candidate in candidates where current[candidate.pid]?.command == "caffeinate" {
+            spawner.terminate(pid: candidate.pid)
+            reclaimed.append(candidate)
         }
-        return untracked
+        return reclaimed
     }
 
     /// Finds the long-lived `claude` ancestor of this process.

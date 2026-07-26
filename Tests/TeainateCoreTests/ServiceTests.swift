@@ -243,6 +243,47 @@ private func liveTable(_ pids: pid_t...) -> [pid_t: ProcessSnapshot] {
     #expect(try service.status().holds.count == 1)   // our hold survives
 }
 
+@Test func reclaimSkipsCandidateNoLongerCaffeinateAtTerminationTime() throws {
+    // Simulates the TOCTOU window: the untracked list is built from one snapshot,
+    // but by the time reclaimUntracked goes to terminate, pid 555 has exited and its
+    // number was recycled by an unrelated process. The fresh re-check right before
+    // signalling must catch this and skip it.
+    final class ChangingSnapshotter: ProcessSnapshotting, @unchecked Sendable {
+        var callCount = 0
+        let tables: [[pid_t: ProcessSnapshot]]
+        init(_ tables: [pid_t: ProcessSnapshot]...) { self.tables = tables }
+        func snapshot() throws -> [pid_t: ProcessSnapshot] {
+            defer { callCount += 1 }
+            return tables[min(callCount, tables.count - 1)]
+        }
+    }
+
+    var stillCaffeinate = liveTable(100)
+    stillCaffeinate[555] = ProcessSnapshot(pid: 555, parentPID: 1,
+                                           command: "caffeinate", arguments: "caffeinate -i")
+    var recycled = liveTable(100)
+    recycled[555] = ProcessSnapshot(pid: 555, parentPID: 1, command: "Safari", arguments: "Safari")
+
+    let spawner = RecordingSpawner()
+    let serviceSnapshotter = ChangingSnapshotter(stillCaffeinate, recycled)
+    let url = FileManager.default.temporaryDirectory
+        .appendingPathComponent("teainate-svc-\(UUID().uuidString)")
+        .appendingPathComponent("holds.json")
+    let service = TeainateService(
+        store: HoldStore(fileURL: url, snapshotter: StubSnapshotter(table: liveTable(100))),
+        spawner: spawner,
+        assertionReader: StubAssertions(),
+        snapshotter: serviceSnapshotter,
+        now: { Date(timeIntervalSince1970: 1_000_000) }
+    )
+    _ = try service.on(HoldOptions(source: .cli))    // ours: pid 100, via the store's own snapshotter
+
+    let reclaimed = try service.reclaimUntracked()
+
+    #expect(reclaimed.isEmpty)
+    #expect(spawner.terminated.isEmpty)
+}
+
 @Test func offAllNeverTouchesUntrackedProcesses() throws {
     let spawner = RecordingSpawner()
     var table = liveTable(100)

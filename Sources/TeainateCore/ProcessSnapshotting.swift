@@ -33,12 +33,17 @@ public enum ProcessSnapshotError: Error, Equatable {
 /// `command == "caffeinate"` comparison in this codebase. `ucomm` is the bare
 /// accounting name and does not have this problem.
 ///
-/// Known limitation: `ucomm` can contain spaces for some processes (e.g. a helper
-/// named "Foo Helper"), and this whitespace-splitting parser will split such a name
-/// at its first space, putting only the first word in `command`. This is harmless
-/// here because the only names ever matched against (`caffeinate`, `claude`,
-/// `claude-code`) contain no spaces — but this parser is not a correct `ucomm` parser
-/// in general.
+/// Known limitation: `ucomm` is still not a reliable process *identifier* in general —
+/// it can simply be wrong. The real Claude Code CLI process reports its version string
+/// (e.g. `2.1.220`) as `ucomm`, not `claude`; only its command line says `claude`. This
+/// is why name-based matching (`findAncestor`) does not trust `command` alone and uses
+/// `identifyingName(of:)`, which reads the command line instead.
+///
+/// Separately, `ucomm` can contain spaces for some processes (e.g. a helper named
+/// "Foo Helper"), and this whitespace-splitting parser will split such a name at its
+/// first space, putting only the first word in `command`. This is harmless here
+/// because the only names ever matched against (`caffeinate`, `claude`, `claude-code`)
+/// contain no spaces — but this parser is not a correct `ucomm` parser in general.
 public func parsePSOutput(_ text: String) -> [pid_t: ProcessSnapshot] {
     var table: [pid_t: ProcessSnapshot] = [:]
     for line in text.split(separator: "\n") {
