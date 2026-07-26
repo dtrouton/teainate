@@ -1,0 +1,28 @@
+2026-07-26 10:07:31 +0100
+Assertion status system-wide:
+   BackgroundTask                 0
+   ApplePushServiceTask           0
+   UserIsActive                   1
+   PreventUserIdleDisplaySleep    0
+   SoftwareUpdateTask             0
+   PreventSystemSleep             0
+   ExternalMedia                  0
+   PreventUserIdleSystemSleep     1
+   NetworkClientActive            0
+Listed by owning process:
+   pid 6667(caffeinate): [0x000012ab00018cbd] 00:01:35 PreventUserIdleSystemSleep named: "caffeinate command-line tool"
+	Details: caffeinate asserting for 300 secs
+	Localized=THE CAFFEINATE TOOL IS PREVENTING SLEEP.
+	Timeout will fire in 205 secs Action=TimeoutActionRelease
+   pid 640(Claude): [0x00000044000181fd] 01:31:43 NoIdleSleepAssertion named: "Electron"
+   pid 341(powerd): [0x0000124400018c63] 00:03:17 PreventUserIdleSystemSleep named: "Powerd - Prevent sleep while display is on"
+   pid 341(powerd): [0x0000124400098c62] 00:03:17 UserIsActive named: "com.apple.powermanagement.lidopen"
+	Timeout will fire in 402 secs Action=TimeoutActionRelease
+   pid 6707(caffeinate): [0x000012f000018cc3] 00:00:26 PreventUserIdleSystemSleep named: "caffeinate command-line tool"
+	Details: caffeinate asserting for 300 secs
+	Localized=THE CAFFEINATE TOOL IS PREVENTING SLEEP.
+	Timeout will fire in 274 secs Action=TimeoutActionRelease
+   pid 400(WindowServer): [0x00000fc4000989b2] 00:00:04 UserIsActive named: "com.apple.iohideventsystem.queue.tickle serviceID:100000a73 service:AppleHIDKeyboardEventDriverV2 product:Apple Internal Keyboard / Trackpad eventType:3"
+	Timeout will fire in 595 secs Action=TimeoutActionRelease
+Kernel Assertions: 0x100=MAGICWAKE
+   id=552  level=255 0x100=MAGICWAKE creat=26/07/2026, 08:43 description=en0 owner=IOSkywalkNetworkBSDClient

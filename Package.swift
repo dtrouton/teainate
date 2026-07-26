@@ -20,7 +20,11 @@ let package = Package(
                 .product(name: "ArgumentParser", package: "swift-argument-parser"),
             ]
         ),
-        .testTarget(name: "TeainateCoreTests", dependencies: ["TeainateCore"]),
+        .testTarget(
+            name: "TeainateCoreTests",
+            dependencies: ["TeainateCore"],
+            resources: [.copy("Fixtures")]
+        ),
     ],
     swiftLanguageModes: [.v6]
 )
