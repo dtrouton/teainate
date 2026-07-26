@@ -47,7 +47,9 @@ public struct SkillInstaller: Sendable {
             return .stale("recorded teainate path no longer exists")
         }
         guard manifest.version == TeainateVersion.current else {
-            return .stale("installed for teainate \(manifest.version)")
+            return .stale(
+                "installed for teainate \(manifest.version), now running \(TeainateVersion.current)"
+            )
         }
         return .current
     }
@@ -67,13 +69,22 @@ public struct SkillInstaller: Sendable {
         try? installSymlink()
     }
 
-    /// Convenience only — the skill works without it because SKILL.md carries an absolute path.
+    /// Convenience only — the skill works without it because SKILL.md carries an
+    /// absolute path. Deliberately refuses to replace anything that is not already
+    /// a symlink: this is the one path teainate touches outside its own directories,
+    /// and a best-effort convenience must never destroy a file the user put there.
     private func installSymlink() throws {
         try FileManager.default.createDirectory(
             at: paths.localBinDirectory, withIntermediateDirectories: true
         )
         let link = paths.localBinDirectory.appendingPathComponent("teainate")
-        try? FileManager.default.removeItem(at: link)
+
+        let attributes = try? FileManager.default.attributesOfItem(atPath: link.path)
+        if let type = attributes?[.type] as? FileAttributeType {
+            guard type == .typeSymbolicLink else { return }   // not ours — leave it alone
+            try FileManager.default.removeItem(at: link)
+        }
+
         try FileManager.default.createSymbolicLink(at: link, withDestinationURL: cliPath)
     }
 }
