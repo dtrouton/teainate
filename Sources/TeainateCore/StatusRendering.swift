@@ -39,7 +39,11 @@ public func renderStatus(_ status: Status) -> String {
 /// A label never replaces the remaining time — "how much longer do I have?" is the
 /// question this tool exists to answer, so a labelled timer shows both:
 /// `build — 42 min left`.
-public func describe(_ hold: HoldStatus) -> String {
+///
+/// `includingID` exists because the two surfaces need different things: in the CLI the
+/// id is essential (you need it for `off --id`), but in the menu you click a row to
+/// release it, so the id is noise.
+public func describe(_ hold: HoldStatus, includingID: Bool = true) -> String {
     var parts: [String] = []
 
     let lifetime = defaultLabel(for: hold)
@@ -54,7 +58,7 @@ public func describe(_ hold: HoldStatus) -> String {
     if hold.acOnly { modifiers.append("only while plugged in") }
     if !modifiers.isEmpty { parts.append("(\(modifiers.joined(separator: ", ")))") }
 
-    parts.append("[\(hold.id)]")
+    if includingID { parts.append("[\(hold.id)]") }
     return parts.joined(separator: " ")
 }
 

@@ -83,8 +83,10 @@ public func buildMenu(
         items.append(.separator)
         items.append(MenuItem(title: "Active holds", isEnabled: false))
         for hold in status.holds {
+            // No id: you click the row to release it, so the id would be pure noise.
             items.append(MenuItem(
-                title: "Release \(describe(hold))", action: .release(hold.id), indent: 1
+                title: "Release \(describe(hold, includingID: false))",
+                action: .release(hold.id), indent: 1
             ))
         }
         items.append(MenuItem(title: "Turn off all", action: .releaseAll))

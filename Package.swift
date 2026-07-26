@@ -7,6 +7,7 @@ let package = Package(
     products: [
         .library(name: "TeainateCore", targets: ["TeainateCore"]),
         .executable(name: "teainate", targets: ["teainate"]),
+        .executable(name: "TeainateApp", targets: ["TeainateApp"]),
     ],
     dependencies: [
         .package(url: "https://github.com/apple/swift-argument-parser.git", from: "1.5.0"),
@@ -20,6 +21,7 @@ let package = Package(
                 .product(name: "ArgumentParser", package: "swift-argument-parser"),
             ]
         ),
+        .executableTarget(name: "TeainateApp", dependencies: ["TeainateCore"]),
         .testTarget(
             name: "TeainateCoreTests",
             dependencies: ["TeainateCore"],

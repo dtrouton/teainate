@@ -48,6 +48,22 @@ private func titles(_ items: [MenuItem]) -> [String] {
     #expect(items.contains { $0.action == .releaseAll })
 }
 
+// This pair is what stops the two surfaces drifting apart: the menu row is click-to-release
+// so the id would be noise, but the CLI still needs it for `off --id`.
+@Test func menuReleaseRowOmitsHoldID() {
+    let items = buildMenu(
+        status: status(holds: [holdStatus(id: "h_build")]),
+        preferences: MenuPreferences(), skillState: .current
+    )
+    let releaseItem = items.first { $0.action == .release("h_build") }
+    #expect(releaseItem?.title.contains("[h_build]") == false)
+}
+
+@Test func cliStatusStillIncludesHoldID() {
+    let text = renderStatus(status(holds: [holdStatus(id: "h_build")]))
+    #expect(text.contains("[h_build]"))
+}
+
 @Test func headerReflectsRemainingTime() {
     let items = buildMenu(
         status: status(holds: [holdStatus(kind: .timer, remaining: 2520)]),
