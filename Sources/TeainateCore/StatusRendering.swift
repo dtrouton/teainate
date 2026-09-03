@@ -31,7 +31,25 @@ public func renderStatus(_ status: Status) -> String {
         lines.append("  (not teainate's — \"teainate off --untracked\" would terminate them)")
     }
 
+    let lid = status.lidClosed
+    lines.append("")
+    if let warning = lid.warning {
+        lines.append("⚠ \(warning)")
+    }
+    if let ended = lid.lastEnded {
+        lines.append(describeEnded(ended))
+    }
+    lines.append(lid.enabled
+        ? "Lid-closed holds: enabled (battery floor \(lid.batteryFloor)%)"
+        : "Lid-closed holds: not enabled — enable from the Teainate menu")
+
     return lines.joined(separator: "\n")
+}
+
+/// One line explaining why the most recent lid-closed hold ended on its own.
+public func describeEnded(_ ended: EndedHold) -> String {
+    let name = ended.label.map { " (\($0))" } ?? ""
+    return "Last lid-closed hold\(name) ended: \(ended.reason)"
 }
 
 /// A one-line description of a hold.
@@ -56,6 +74,10 @@ public func describe(_ hold: HoldStatus, includingID: Bool = true) -> String {
     var modifiers: [String] = []
     if hold.display { modifiers.append("display on") }
     if hold.acOnly { modifiers.append("only while plugged in") }
+    if hold.lidClosed {
+        modifiers.append("lid ok")
+        if let floor = hold.batteryFloor { modifiers.append("off at \(floor)%") }
+    }
     if !modifiers.isEmpty { parts.append("(\(modifiers.joined(separator: ", ")))") }
 
     if includingID { parts.append("[\(hold.id)]") }
