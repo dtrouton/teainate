@@ -4,17 +4,36 @@ public enum HoldStoreError: Error, Equatable {
     case lockTimeout
 }
 
-/// Drops holds whose PID is gone, or now belongs to a process that is not `caffeinate`.
+public let caffeinateProcessName = "caffeinate"
+/// The watcher is the CLI binary itself, so `ucomm` reports the executable's name.
+public let watcherProcessName = "teainate"
+
+/// The `ucomm` a live hold's recorded pid must carry to still be ours.
+public func expectedProcessName(for hold: Hold) -> String {
+    hold.lidClosed ? watcherProcessName : caffeinateProcessName
+}
+
+/// Drops holds whose PID is gone, or now belongs to a process of the wrong kind.
 /// This is what lets a plain file be a safe source of truth: a stale record can exist
 /// after a crash, but never survives the next read.
 ///
-/// This does NOT protect against a PID being recycled by another `caffeinate` process —
-/// if a dead hold's PID is reused by an unrelated `caffeinate` (for example, another
-/// Claude Code session's), this adopts it as our own. Closing that gap would mean
-/// recording and matching the process's start time (`ps -o lstart=`) alongside the PID,
-/// which is not implemented here.
+/// This does NOT protect against a PID being recycled by another process of the same
+/// name — see docs/followups.md ("Close the PID-recycling gap properly").
 public func reconcile(_ holds: [Hold], against table: [pid_t: ProcessSnapshot]) -> [Hold] {
-    holds.filter { table[$0.caffeinatePID]?.command == "caffeinate" }
+    holds.filter { table[$0.caffeinatePID]?.command == expectedProcessName(for: $0) }
+}
+
+/// Every pid teainate is responsible for: the hold processes themselves plus the
+/// caffeinate child of each lid-closed watcher. Without the children, a watcher's own
+/// caffeinate would be listed — and reclaimable — as "not managed by teainate".
+public func ownedPIDs(of holds: [Hold], in table: [pid_t: ProcessSnapshot]) -> Set<pid_t> {
+    var owned = Set(holds.map(\.caffeinatePID))
+    let watchers = Set(holds.filter(\.lidClosed).map(\.caffeinatePID))
+    for entry in table.values
+    where entry.command == caffeinateProcessName && watchers.contains(entry.parentPID) {
+        owned.insert(entry.pid)
+    }
+    return owned
 }
 
 public struct HoldStore: Sendable {

@@ -45,6 +45,35 @@ private func tempFile() -> URL {
     #expect(kept.isEmpty)
 }
 
+private func lidHold(_ id: String, pid: pid_t) -> Hold {
+    var h = hold(id, pid: pid)
+    h.lidClosed = true
+    return h
+}
+
+@Test func reconcileKeepsLidClosedHoldWhosePIDIsTheWatcher() {
+    let kept = reconcile([lidHold("l", pid: 100)], against: table((100, "teainate")))
+    #expect(kept.map(\.id) == ["l"])
+}
+
+@Test func reconcileDropsLidClosedHoldWhosePIDIsNowCaffeinate() {
+    // A watcher's pid recycled by a bare caffeinate is not our watcher.
+    let kept = reconcile([lidHold("l", pid: 100)], against: table((100, "caffeinate")))
+    #expect(kept.isEmpty)
+}
+
+@Test func reconcileDropsOrdinaryHoldWhosePIDIsNowTeainate() {
+    let kept = reconcile([hold("a", pid: 100)], against: table((100, "teainate")))
+    #expect(kept.isEmpty)
+}
+
+@Test func ownedPIDsIncludeWatcherAndItsCaffeinateChild() {
+    var t = table((100, "teainate"), (200, "caffeinate"), (300, "caffeinate"))
+    t[200] = ProcessSnapshot(pid: 200, parentPID: 100, command: "caffeinate", arguments: "caffeinate -i -w 100")
+    let owned = ownedPIDs(of: [lidHold("l", pid: 100)], in: t)
+    #expect(owned == [100, 200])   // 300 is somebody else's
+}
+
 @Test func readOnMissingFileReturnsEmpty() throws {
     let store = HoldStore(fileURL: tempFile(), snapshotter: FakeSnapshotter(table: [:]))
     #expect(try store.read().isEmpty)
