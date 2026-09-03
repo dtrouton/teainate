@@ -23,7 +23,7 @@ struct StatusCommand: ParsableCommand {
     var json = false
 
     func run() throws {
-        let status = try TeainateService.standard().status()
+        let status = try standardService().status()
         if json {
             let data = try TeainateCore.Status.encoder.encode(status)
             print(String(decoding: data, as: UTF8.self))
@@ -37,6 +37,34 @@ struct StatusCommand: ParsableCommand {
 /// unlike CleanExit, which prints to stdout and exits 0.
 struct FriendlyError: Error, CustomStringConvertible {
     let description: String
+}
+
+/// The CLI is its own watcher binary.
+func standardService() -> TeainateService {
+    TeainateService.standard(
+        watcherExecutable: Bundle.main.executableURL ?? URL(fileURLWithPath: CommandLine.arguments[0]))
+}
+
+/// Every lid-closed refusal is a user-facing sentence, non-zero exit, stderr.
+func friendlyDescription(_ error: ServiceError) -> String? {
+    switch error {
+    case .lidClosedNotEnabled:
+        return "Lid-closed holds are not enabled. Enable them from the Teainate menu (Enable lid-closed holds…) first."
+    case .lidClosedGrantBroken(let message):
+        return "Lid-closed holds are enabled but sudo refused: \(message). Disable and re-enable them from the Teainate menu."
+    case .batteryBelowFloor(let percent, let floor):
+        return "Battery at \(percent)%, at or below the \(floor)% floor. Plug in, or raise the floor from the Teainate menu."
+    case .notOnACPower:
+        return "--ac-only with --lid-closed needs the Mac to be plugged in now."
+    case .sleepDisabledElsewhere:
+        return "Sleep is already disabled outside teainate (pmset disablesleep). An ordinary hold will work with the lid closed until that is cleared."
+    case .sleepFlagStuck(let message):
+        return "The hold failed and the sleep-disabled flag could not be cleared: \(message). Run: sudo pmset -a disablesleep 0"
+    case .lidClosedUnavailable:
+        return "Lid-closed holds are not available in this build."
+    case .noClaudeAncestor, .spawnFailed:
+        return nil
+    }
 }
 
 struct On: ParsableCommand {
@@ -62,6 +90,9 @@ struct On: ParsableCommand {
     @Option(name: .long, help: "A human-readable note shown in the menu bar.")
     var label: String?
 
+    @Flag(name: .long, help: "Keep the Mac awake even with the lid closed. Needs --for, --session, or --until-pid, and lid-closed holds enabled from the Teainate menu.")
+    var lidClosed = false
+
     func validate() throws {
         let lifetimes = [`for` != nil, session, untilPid != nil].filter { $0 }.count
         if lifetimes > 1 {
@@ -81,10 +112,18 @@ struct On: ParsableCommand {
                 )
             }
         }
+
+        if lidClosed {
+            let duration = try? `for`.map(parseDuration)
+            let hasLifetime = `for` != nil || session || untilPid != nil
+            if let problem = lidClosedCommandLineProblem(duration: duration ?? nil, hasLifetime: hasLifetime) {
+                throw ValidationError(problem)
+            }
+        }
     }
 
     func run() throws {
-        let service = TeainateService.standard()
+        let service = standardService()
 
         var watched: pid_t?
         if session {
@@ -105,13 +144,21 @@ struct On: ParsableCommand {
             acOnly: acOnly,
             display: display,
             label: label,
+            lidClosed: lidClosed,
             source: session ? .claude : .cli
         )
-        let hold = try service.on(options)
+        let hold: Hold
+        do {
+            hold = try service.on(options)
+        } catch let error as ServiceError {
+            if let message = friendlyDescription(error) { throw FriendlyError(description: message) }
+            throw error
+        }
         let holdStatus = HoldStatus(
             id: hold.id, kind: hold.kind, label: hold.label, source: hold.source,
             expiresAt: hold.expiresAt, remainingSeconds: hold.remainingSeconds(now: Date()),
-            display: hold.display, acOnly: hold.acOnly
+            display: hold.display, acOnly: hold.acOnly,
+            lidClosed: hold.lidClosed, batteryFloor: hold.batteryFloor
         )
         print("● Holding the Mac awake — \(describe(holdStatus))")
     }
@@ -212,7 +259,7 @@ struct Off: ParsableCommand {
     }
 
     func run() throws {
-        let service = TeainateService.standard()
+        let service = standardService()
 
         // Deliberately separate from --all: this kills processes we did not start
         // and cannot prove are stale, so it must always be asked for explicitly.
