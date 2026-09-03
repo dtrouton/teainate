@@ -91,3 +91,135 @@ public func lidWatchArguments(_ config: LidWatchConfig, stateFile: URL) -> [Stri
 public func watcherChildFlags(caffeinateFlags: [String], watcherPID: pid_t) -> [String] {
     caffeinateFlags + ["-w", String(watcherPID)]
 }
+
+public protocol ProcessLiveness: Sendable {
+    func isAlive(_ pid: pid_t) -> Bool
+}
+
+/// `kill(pid, 0)` liveness. Reaps first so an exited child of ours is not mistaken
+/// for a live zombie; after Foundation has already reaped it, waitpid fails and
+/// kill reports ESRCH, both of which read as "gone".
+public struct KillZeroLiveness: ProcessLiveness {
+    public init() {}
+    public func isAlive(_ pid: pid_t) -> Bool {
+        var status: Int32 = 0
+        if waitpid(pid, &status, WNOHANG) == pid { return false }
+        if kill(pid, 0) == 0 { return true }
+        return errno == EPERM
+    }
+}
+
+/// Set from a signal handler's dispatch source; read by the loop.
+public final class StopFlag: @unchecked Sendable {
+    private let lock = NSLock()
+    private var flag = false
+    public init() {}
+    public func set() { lock.lock(); flag = true; lock.unlock() }
+    public var isSet: Bool { lock.lock(); defer { lock.unlock() }; return flag }
+}
+
+/// Supervises one lid-closed hold. Runs inside `teainate lid-watch`.
+public struct LidWatchRunner: Sendable {
+    public struct Dependencies: Sendable {
+        public var store: HoldStore
+        public var spawner: any CaffeinateSpawning
+        public var battery: any BatteryReading
+        /// nil = never touch the kernel flag (the `--no-flag` test hook).
+        public var flag: (any SleepFlagControlling)?
+        public var liveness: any ProcessLiveness
+        public var log: @Sendable (String) -> Void
+        public var sleep: @Sendable (UInt32) -> Void
+        public var now: @Sendable () -> Date
+        /// Seconds between rail checks. Stop requests are noticed every second.
+        public var checkInterval: UInt32
+
+        public init(
+            store: HoldStore, spawner: any CaffeinateSpawning, battery: any BatteryReading,
+            flag: (any SleepFlagControlling)?, liveness: any ProcessLiveness,
+            log: @escaping @Sendable (String) -> Void,
+            sleep: @escaping @Sendable (UInt32) -> Void = { _ = Darwin.sleep($0) },
+            now: @escaping @Sendable () -> Date = { Date() },
+            checkInterval: UInt32 = 30
+        ) {
+            self.store = store; self.spawner = spawner; self.battery = battery
+            self.flag = flag; self.liveness = liveness; self.log = log
+            self.sleep = sleep; self.now = now; self.checkInterval = checkInterval
+        }
+    }
+
+    private let deps: Dependencies
+
+    public init(dependencies: Dependencies) {
+        self.deps = dependencies
+    }
+
+    public func run(_ config: LidWatchConfig, ownPID: pid_t, stop: StopFlag) -> WatcherEndReason {
+        // The service already set the flag before spawning us. Setting it again is
+        // idempotent and closes the window where a previous watcher's exit cleared it
+        // between the service's set and its record.
+        if let flag = deps.flag {
+            do { try flag.set() } catch { deps.log("\(config.holdID) could not re-set sleep flag: \(error)") }
+        }
+
+        let child: pid_t
+        do {
+            child = try deps.spawner.spawn(flags: watcherChildFlags(
+                caffeinateFlags: config.caffeinateFlags, watcherPID: ownPID))
+        } catch {
+            let reason = WatcherEndReason.caffeinateFailed("\(error)")
+            finish(config, reason: reason)
+            return reason
+        }
+
+        var reason: WatcherEndReason?
+        while reason == nil {
+            var waited: UInt32 = 0
+            while waited < deps.checkInterval && !stop.isSet {
+                deps.sleep(1)
+                waited += 1
+            }
+            if stop.isSet { reason = .released; break }
+
+            let battery = (try? deps.battery.read()) ?? nil
+            reason = watcherDecision(
+                childAlive: deps.liveness.isAlive(child),
+                watchedAlive: config.watchedPID.map(deps.liveness.isAlive),
+                battery: battery, floor: config.floor, acOnly: config.acOnly
+            )
+        }
+
+        deps.spawner.terminate(pid: child)
+        finish(config, reason: reason ?? .released)
+        return reason ?? .released
+    }
+
+    /// Two separate mutations on purpose: removing the record and noting the reason
+    /// must land even when clearing the flag fails.
+    private func finish(_ config: LidWatchConfig, reason: WatcherEndReason) {
+        do {
+            try deps.store.mutateState { state in
+                state.holds.removeAll { $0.id == config.holdID }
+                if reason.cutsWorkShort {
+                    state.lastEnded = EndedHold(
+                        id: config.holdID, label: config.label,
+                        reason: reason.description, at: deps.now())
+                }
+            }
+        } catch {
+            deps.log("\(config.holdID) could not update state: \(error)")
+        }
+
+        if let flag = deps.flag {
+            do {
+                try deps.store.mutateState { state in
+                    guard !state.holds.contains(where: \.lidClosed) else { return }
+                    try flag.clear()
+                    state.lidFlagOwned = false
+                }
+            } catch {
+                deps.log("\(config.holdID) could not clear sleep flag: \(error)")
+            }
+        }
+        deps.log("\(config.holdID) ended: \(reason.description)")
+    }
+}
