@@ -150,6 +150,21 @@ look when the culprit is a stray `caffeinate`.
 - `--ac-only` — release automatically when unplugged from AC power
 - `--display` — also keep the screen on (off by default; most tasks do not need it)
 - `--label "..."` — a note shown in the menu bar
+- `--lid-closed` — keep the Mac awake even with the lid closed; see below
+
+## Closing the lid
+
+Only when the user has said they will close the laptop or take it somewhere:
+
+```bash
+{{CLI_PATH}} on --session --lid-closed --label "overnight migration"
+```
+
+Always pair `--lid-closed` with `--session` or `--for`; it refuses to run indefinitely
+from the command line. If it fails with "not enabled", tell the user to choose
+**Enable lid-closed holds…** in the Teainate menu. Do not try to work around it with
+`pmset` or `sudo` yourself — the menu sets up a narrow, revocable grant, and anything
+else leaves the Mac unable to sleep.
 
 ## Releasing
 

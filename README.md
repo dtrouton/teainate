@@ -57,6 +57,30 @@ which is what you want for long builds and Claude Code sessions.
 A label (`--label`) is just a note shown alongside a hold — it never replaces the
 countdown, so a labelled timed hold still shows something like `build — 42 min left`.
 
+### Lid-closed holds
+
+`caffeinate` cannot survive closing the lid: that is an explicit sleep request, not
+idle sleep. teainate's `--lid-closed` modifier sets the kernel `SleepDisabled` flag
+(`pmset -a disablesleep 1`) for exactly the life of one hold:
+
+```bash
+teainate on --lid-closed --for 2h
+teainate on --lid-closed --session
+```
+
+It needs a one-time grant from the menu (**Enable lid-closed holds…**), which writes
+`/etc/sudoers.d/teainate-<you>` allowing exactly two commands: `pmset -a disablesleep 1`
+and `0`. Nothing else can run through it, and **Disable lid-closed holds…** removes it.
+
+Safety rails: a battery floor (default 15%, set from the menu) ends the hold before
+the battery drains; command-line holds must have a duration (max 8 h) or a watched
+process; and every teainate read clears a flag left behind by a crash. A closed
+MacBook under sustained load runs hot — use judgement.
+
+Each lid-closed hold is a `teainate lid-watch` watcher process rather than a bare
+`caffeinate`; the watcher runs `caffeinate -w <its own pid>` so a dead watcher can
+never leave an orphaned caffeinate.
+
 ### Untracked caffeinate processes
 
 teainate can only track holds it started itself. `teainate status` also lists any

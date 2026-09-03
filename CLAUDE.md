@@ -26,7 +26,12 @@ When testing, only ever terminate PIDs your own test spawned, give every spawned
 `caffeinate` a short `-t` backstop, and clean up with `defer` so a failed
 assertion cannot leave the Mac awake.
 
-## Two traps that already caused Critical bugs
+**Never run `sudo pmset -a disablesleep` from a test, and never construct
+`SudoSleepFlagController` in one.** The real-process watcher test passes `--no-flag`.
+If this machine has the grant, a test that cleared the flag would end a real
+lid-closed hold — possibly one keeping another session alive.
+
+## Three traps that already caused Critical bugs
 
 **Use `ucomm=`, never `comm=`.** `ps -o comm=` reports the executable *path*, and
 truncates it to the column width when other fields follow. The spawner execs
@@ -41,7 +46,13 @@ Ancestor matching goes through `identifyingName(of:)`, which takes the basename 
 the command line's first token. Matching `ucomm` directly meant `--session` — the
 entire point of the skill — could never work for anyone.
 
-Both bugs passed the full test suite. See below for why.
+**The watcher's `ucomm` is `teainate`, not `caffeinate`.** A lid-closed hold's
+recorded PID is the `teainate lid-watch` process, not a bare `caffeinate` child, so
+`reconcile` has to be kind-aware: `caffeinate` for ordinary holds, `teainate` for
+lid-closed ones. `RealLidWatchTests` is the only test that proves it — everything
+hermetic fakes the process table and would pass either way.
+
+All three bugs passed the full test suite. See below for why.
 
 ## What the test suite cannot see
 

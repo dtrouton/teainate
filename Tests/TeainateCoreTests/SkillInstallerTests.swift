@@ -162,3 +162,10 @@ private func fakeCLI(in paths: TeainatePaths) throws -> URL {
     #expect(rendered.contains("--session"))
     #expect(rendered.contains("name: teainate"))
 }
+
+@Test func skillExplainsLidClosedHolds() {
+    let text = renderSkillTemplate(cliPath: "/x/teainate")
+    #expect(text.contains("--lid-closed"))
+    #expect(text.contains("Enable lid-closed holds"))
+    #expect(!text.contains("battery floor"))     // the skill never sets or mentions it
+}

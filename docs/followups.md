@@ -5,6 +5,11 @@ fixed. None risk data loss or other processes' holds. Ordered roughly by value.
 
 ## Worth doing next
 
+**Lid-closed holds: deferred rails.** Low Power Mode step-aside (overlaps the floor;
+one more thing to poll), a per-hold floor override for humans at the CLI, and a
+`status` line for "grant present but sudo refuses" (only detectable by a `sudo -n`
+probe, which `status` deliberately never runs — today it surfaces at `on` time).
+
 **Distinguish "pmset failed" from "nothing else is holding the Mac awake."**
 `status()` swallows a `pmset` failure with `(try? ...) ?? []`, and
 `PMSetAssertionReader` never checks `terminationStatus`. Three different

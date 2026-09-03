@@ -64,7 +64,7 @@ binary run as a hidden subcommand. The watcher owns one `caffeinate` child,
 polls the rails, and clears the flag on its way out.
 
 ```
-teainate lid-watch --id h_3f2a --floor 15 [--watch-pid 6707] [--ac-only] -- -i [-d] [-t 7200]
+teainate lid-watch --id h_3f2a --floor 15 --state-file <path> --caffeinate "-i -t 7200" [--watch-pid 6707] [--ac-only] [--label <label>]
 ```
 
 Every existing invariant still holds. The hold's PID is a real child that was
@@ -168,9 +168,10 @@ is the same dialog deleting the file.
 
 Valid 5–50, default 15. The menu writes it. `on` reads it and copies the value
 into the hold record, so a change never alters a running hold, matching how the
-other modifiers apply only to the next activation. Missing file, invalid JSON, or
-an out-of-range value all yield 15 and a warning in `status` — never a crash,
-never a riskier value.
+other modifiers apply only to the next activation. A missing file yields 15
+silently — that is every user's starting state, before the menu has ever written
+one. An empty file, invalid JSON, or an out-of-range value yields 15 plus a
+warning in `status` — never a crash, never a riskier value.
 
 ### Hold record
 
@@ -284,6 +285,11 @@ convention. The pre-flight table above covers refusals. Two runtime cases:
 - **Floor hit.** The hold ends, the reason is recorded, the app notifies if
   running. The CLI has no way to notify, which is why the reason persists in
   state.
+- **Grant present but sudo refuses it** (revoked entitlement, corrupted sudoers
+  file, and the like) surfaces only when `on` actually tries the privileged step
+  and `sudo -n` fails — not in `status`, which reads the sudoers file's presence
+  and never probes `sudo`, so it stays cheap and can never prompt. See
+  `docs/followups.md` for the deferred `status` line.
 
 ## Testing
 
@@ -309,7 +315,8 @@ CLAUDE.md is explicit: a green suite is not evidence that anything involving
 - Menu model: modifier greyed without the grant; disable greyed with a live
   hold; floor submenu marks the current value; header shows the cannot-clear
   warning.
-- Settings decoding: missing file, invalid JSON, out-of-range → 15.
+- Settings decoding: missing file → 15 silently; empty file, invalid JSON, and
+  out-of-range each → 15 plus a warning.
 - State decoding: bare-array and object shapes both load.
 
 **Real-process tests** (`TeainateIntegrationTests`), short `-t` backstops and
