@@ -58,6 +58,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             installSkill()
         case .quit:
             NSApp.terminate(nil)
+        case .toggleLidClosed, .enableLidClosed, .disableLidClosed, .setBatteryFloor:
+            break // Wired up in Task 14.
         case .none:
             break
         }

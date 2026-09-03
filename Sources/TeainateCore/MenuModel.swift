@@ -10,6 +10,10 @@ public enum MenuAction: Sendable, Equatable {
     case reclaimUntracked
     case installSkill
     case quit
+    case toggleLidClosed
+    case enableLidClosed
+    case disableLidClosed
+    case setBatteryFloor(Int)
     case none
 }
 
@@ -20,10 +24,12 @@ public struct MenuItem: Sendable, Equatable {
     public let isChecked: Bool
     public let isSeparator: Bool
     public let indent: Int
+    public let submenu: [MenuItem]
 
     public init(
         title: String, action: MenuAction = .none, isEnabled: Bool = true,
-        isChecked: Bool = false, isSeparator: Bool = false, indent: Int = 0
+        isChecked: Bool = false, isSeparator: Bool = false, indent: Int = 0,
+        submenu: [MenuItem] = []
     ) {
         self.title = title
         self.action = action
@@ -31,6 +37,7 @@ public struct MenuItem: Sendable, Equatable {
         self.isChecked = isChecked
         self.isSeparator = isSeparator
         self.indent = indent
+        self.submenu = submenu
     }
 
     public static let separator = MenuItem(title: "", isEnabled: false, isSeparator: true)
@@ -40,10 +47,12 @@ public struct MenuItem: Sendable, Equatable {
 public struct MenuPreferences: Sendable, Equatable {
     public var acOnly: Bool
     public var display: Bool
+    public var lidClosed: Bool
 
-    public init(acOnly: Bool = false, display: Bool = false) {
+    public init(acOnly: Bool = false, display: Bool = false, lidClosed: Bool = false) {
         self.acOnly = acOnly
         self.display = display
+        self.lidClosed = lidClosed
     }
 }
 
@@ -64,6 +73,12 @@ public func buildMenu(
     var items: [MenuItem] = []
 
     items.append(MenuItem(title: headerTitle(status), isEnabled: false))
+    if let warning = status.lidClosed.warning {
+        items.append(MenuItem(title: "⚠ \(warning)", isEnabled: false))
+    }
+    if let ended = status.lidClosed.lastEnded {
+        items.append(MenuItem(title: describeEnded(ended), isEnabled: false))
+    }
     items.append(.separator)
 
     for choice in menuDurationChoices {
@@ -77,6 +92,13 @@ public func buildMenu(
     ))
     items.append(MenuItem(
         title: "Keep display on", action: .toggleDisplay, isChecked: preferences.display
+    ))
+
+    let lidEnabled = status.lidClosed.enabled
+    items.append(MenuItem(
+        title: lidEnabled ? "Allow closing the lid" : "Allow closing the lid (enable below)",
+        action: .toggleLidClosed, isEnabled: lidEnabled,
+        isChecked: lidEnabled && preferences.lidClosed
     ))
 
     if !status.holds.isEmpty {
@@ -119,9 +141,28 @@ public func buildMenu(
     items.append(.separator)
     items.append(skillItem(skillState))
     items.append(.separator)
+    items.append(contentsOf: lidClosedItems(status))
+    items.append(.separator)
     items.append(MenuItem(title: "Quit teainate", action: .quit))
 
     return items
+}
+
+private func lidClosedItems(_ status: Status) -> [MenuItem] {
+    let lid = status.lidClosed
+    guard lid.enabled else {
+        return [MenuItem(title: "Enable lid-closed holds…", action: .enableLidClosed)]
+    }
+    let choices = batteryFloorChoices.map { floor in
+        MenuItem(title: "\(floor)%", action: .setBatteryFloor(floor), isChecked: floor == lid.batteryFloor)
+    }
+    let liveLidHold = status.holds.contains(where: \.lidClosed)
+    return [
+        MenuItem(title: "Lid-closed holds enabled ✓", isEnabled: false),
+        MenuItem(title: "Battery floor: \(lid.batteryFloor)%", submenu: choices),
+        // Revoking under a live watcher would leave it unable to clear the flag.
+        MenuItem(title: "Disable lid-closed holds…", action: .disableLidClosed, isEnabled: !liveLidHold),
+    ]
 }
 
 private func headerTitle(_ status: Status) -> String {

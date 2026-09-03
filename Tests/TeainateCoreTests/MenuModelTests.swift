@@ -5,20 +5,27 @@ import Foundation
 private func status(
     holds: [HoldStatus] = [],
     foreign: [ForeignAssertion] = [],
-    untracked: [UntrackedCaffeinate] = []
+    untracked: [UntrackedCaffeinate] = [],
+    lid: LidClosedStatus = .unavailable
 ) -> Status {
     Status(
         awake: !holds.isEmpty, holds: holds,
-        foreignAssertions: foreign, untrackedCaffeinate: untracked
+        foreignAssertions: foreign, untrackedCaffeinate: untracked, lidClosed: lid
     )
 }
 
-private func holdStatus(id: String = "h_1", kind: HoldKind = .forever, remaining: Int? = nil) -> HoldStatus {
+private func holdStatus(
+    id: String = "h_1", kind: HoldKind = .forever, remaining: Int? = nil, lidClosed: Bool = false
+) -> HoldStatus {
     HoldStatus(
         id: id, kind: kind, label: nil, source: .menu,
-        expiresAt: nil, remainingSeconds: remaining, display: false, acOnly: false
+        expiresAt: nil, remainingSeconds: remaining, display: false, acOnly: false,
+        lidClosed: lidClosed
     )
 }
+
+private let granted = LidClosedStatus(enabled: true, flagSet: false, flagSetBy: nil, batteryFloor: 15, lastEnded: nil, warning: nil)
+private let notGranted = LidClosedStatus(enabled: false, flagSet: false, flagSetBy: nil, batteryFloor: 15, lastEnded: nil, warning: nil)
 
 private func titles(_ items: [MenuItem]) -> [String] {
     items.filter { !$0.isSeparator }.map(\.title)
@@ -197,4 +204,57 @@ private func titles(_ items: [MenuItem]) -> [String] {
 @Test func iconIsActiveOnlyWhenHoldsExist() {
     #expect(statusIconIsActive(status()) == false)
     #expect(statusIconIsActive(status(holds: [holdStatus()])) == true)
+}
+
+@Test func lidModifierIsGreyedUntilGranted() {
+    let items = buildMenu(status: status(lid: notGranted), preferences: MenuPreferences(lidClosed: true), skillState: .current)
+    let row = items.first { $0.action == .toggleLidClosed }
+    #expect(row?.isEnabled == false)
+    #expect(row?.isChecked == false)
+    #expect(row?.title == "Allow closing the lid (enable below)")
+}
+
+@Test func lidModifierChecksWhenGrantedAndPreferred() {
+    let items = buildMenu(status: status(lid: granted), preferences: MenuPreferences(lidClosed: true), skillState: .current)
+    let row = items.first { $0.action == .toggleLidClosed }
+    #expect(row?.isEnabled == true)
+    #expect(row?.isChecked == true)
+    #expect(row?.title == "Allow closing the lid")
+}
+
+@Test func offersEnableWhenNotGranted() {
+    let items = buildMenu(status: status(lid: notGranted), preferences: MenuPreferences(), skillState: .current)
+    #expect(items.contains { $0.action == .enableLidClosed && $0.title == "Enable lid-closed holds…" })
+    #expect(!items.contains { $0.action == .disableLidClosed })
+    #expect(!items.contains { $0.title.hasPrefix("Battery floor") })
+}
+
+@Test func offersFloorAndDisableWhenGranted() {
+    let items = buildMenu(status: status(lid: granted), preferences: MenuPreferences(), skillState: .current)
+    #expect(items.contains { $0.title == "Lid-closed holds enabled ✓" && !$0.isEnabled })
+    let floor = items.first { $0.title == "Battery floor: 15%" }
+    #expect(floor?.submenu.map(\.action) == batteryFloorChoices.map { .setBatteryFloor($0) })
+    #expect(floor?.submenu.first { $0.action == .setBatteryFloor(15) }?.isChecked == true)
+    #expect(floor?.submenu.first { $0.action == .setBatteryFloor(30) }?.isChecked == false)
+    #expect(items.first { $0.action == .disableLidClosed }?.isEnabled == true)
+}
+
+@Test func disableIsGreyedWhileALidHoldIsLive() {
+    let items = buildMenu(status: status(holds: [holdStatus(lidClosed: true)], lid: granted),
+                          preferences: MenuPreferences(), skillState: .current)
+    #expect(items.first { $0.action == .disableLidClosed }?.isEnabled == false)
+}
+
+@Test func headerShowsWarningLine() {
+    let warned = LidClosedStatus(enabled: true, flagSet: true, flagSetBy: "teainate", batteryFloor: 15, lastEnded: nil,
+                                 warning: "The sleep-disabled flag is set and teainate cannot clear it. Run: sudo pmset -a disablesleep 0")
+    let items = buildMenu(status: status(lid: warned), preferences: MenuPreferences(), skillState: .current)
+    #expect(titles(items)[1].hasPrefix("⚠ The sleep-disabled flag is set"))
+}
+
+@Test func showsLastEndedReason() {
+    let ended = EndedHold(id: "h_x", label: "build", reason: "battery 14% at floor 15%", at: Date())
+    let lid = LidClosedStatus(enabled: true, flagSet: false, flagSetBy: nil, batteryFloor: 15, lastEnded: ended, warning: nil)
+    let items = buildMenu(status: status(lid: lid), preferences: MenuPreferences(), skillState: .current)
+    #expect(titles(items).contains("Last lid-closed hold (build) ended: battery 14% at floor 15%"))
 }
