@@ -112,19 +112,23 @@ lid-closed hold ended on its own.
 `on` for a lid-closed hold does the privileged step itself, in this order:
 
 1. Run every pre-flight check (below). Any failure: nothing has been touched.
-2. `sudo -n /usr/bin/pmset -a disablesleep 1`.
-3. Spawn the watcher.
-4. Record the hold and set the ownership marker.
+2. Persist the ownership marker (teainate may have set the flag).
+3. `sudo -n /usr/bin/pmset -a disablesleep 1`.
+4. Spawn the watcher.
+5. Record the hold.
 
-If step 3 or 4 fails, `on` clears the flag before rethrowing. This extends the
-existing rule — spawn before recording, clean up if recording fails — to the
-flag. If clearing also fails, the error says so explicitly: that is the one
-outcome that leaves the Mac unable to sleep.
+Step 2 comes before the privileged call so a crash between here and step 5
+(SIGINT during sudo, spawn, or `ps`) still leaves the marker set — the next
+read then treats the flag as teainate's to check on, rather than something
+set outside teainate. If step 3, 4, or 5 fails, `on` clears the flag before
+rethrowing. This extends the existing rule — spawn before recording, clean up
+if recording fails — to the flag. If clearing also fails, the error says so
+explicitly: that is the one outcome that leaves the Mac unable to sleep.
 
 ### Ownership marker and orphan cleanup
 
-`holds.json` gains one top-level boolean, `lid_flag_owned`, true while teainate
-believes it set the flag. On every read, after reconciliation:
+`holds.json` gains one top-level boolean, `lid_flag_owned`, true while
+teainate may have set the flag. On every read, after reconciliation:
 
 - Marker true, no live lid-closed hold: the flag was orphaned by a SIGKILLed
   watcher or a crash. Clear the flag (needs the grant) and the marker.

@@ -227,6 +227,7 @@ public struct TeainateService: Sendable {
 
     public func on(_ options: HoldOptions) throws -> Hold {
         if options.lidClosed { return try onLidClosed(options) }
+        try clearOrphanedFlag()
 
         // Spawn first: a hold record must never describe a process that does not exist.
         let flags = caffeinateFlags(for: options)
@@ -269,15 +270,25 @@ public struct TeainateService: Sendable {
             }
         }
         try clearOrphanedFlag()
-        let state = try store.readState()
+        // Persist the marker before the privileged `set()` call, in the same atomic
+        // mutateState as the pre-flight check: a crash between here and the final
+        // record (SIGINT during sudo, spawn, or ps) then leaves the marker saying
+        // "teainate may have set the flag" rather than a disabled-sleep flag that
+        // looks like it was set outside teainate. mutateState never persists when its
+        // body throws, so a failed check below still leaves nothing touched.
+        //
         // A live lid-closed hold already owning the flag is why we leave it alone on
         // failure below. A set marker with no live hold instead means a previous
         // attempt here set the flag and got stuck clearing it (see `undo`'s catch) —
         // that is ours to keep retrying, not "someone else", so it must not trip the
         // sleepDisabledElsewhere check.
-        let liveLidHold = state.holds.contains(where: \.lidClosed)
-        if !liveLidHold, !state.lidFlagOwned, (try? lid.flag.isSet()) == true {
-            throw ServiceError.sleepDisabledElsewhere
+        let liveLidHold = try store.mutateState { state -> Bool in
+            let liveLidHold = state.holds.contains(where: \.lidClosed)
+            if !liveLidHold, !state.lidFlagOwned, (try? lid.flag.isSet()) == true {
+                throw ServiceError.sleepDisabledElsewhere
+            }
+            state.lidFlagOwned = true
+            return liveLidHold
         }
 
         do { try lid.flag.set() } catch {
@@ -356,7 +367,10 @@ public struct TeainateService: Sendable {
         for hold in released {
             spawner.terminate(pid: hold.caffeinatePID)
         }
-        try clearOrphanedFlag()
+        // The release already happened (holds removed, processes signalled); a lock
+        // timeout here must not turn that into a reported failure. The next read
+        // retries this cleanup.
+        try? clearOrphanedFlag()
         return released
     }
 

@@ -6,6 +6,10 @@ private final class FakeFlag: SleepFlagControlling, @unchecked Sendable {
     var value = false
     var setCount = 0
     var clearCount = 0
+    /// Every call into `clear()`, whether or not it goes on to fail — lets a test prove
+    /// a code path never even attempted the privileged clear, not just that it didn't
+    /// succeed.
+    var clearAttempts = 0
     var failSet = false
     var failClear = false
     func set() throws {
@@ -13,6 +17,7 @@ private final class FakeFlag: SleepFlagControlling, @unchecked Sendable {
         setCount += 1; value = true
     }
     func clear() throws {
+        clearAttempts += 1
         if failClear { throw SleepFlagError.commandFailed(status: 1, message: "sudo: a password is required") }
         clearCount += 1; value = false
     }
@@ -194,6 +199,26 @@ private struct Rig {
     }
 }
 
+@Test func failedSetLeavesMarkerTrueButNextReadSelfHealsWithoutSudo() throws {
+    // A crash (or here, a failed sudo call) between persisting the marker and actually
+    // setting the flag must not look like "someone else disabled sleep" on the next
+    // read: the marker says the flag is teainate's to check on, so `status` clears it
+    // for free once it sees the flag was never actually set — no clear() call needed.
+    let rig = Rig()
+    rig.flag.failSet = true
+    #expect(throws: ServiceError.self) { try rig.service.on(rig.lid()) }
+
+    let afterFailure = try HoldStore(fileURL: rig.stateFile, snapshotter: StubSnapshotter(table: Rig.table((100, "teainate")))).readState()
+    #expect(afterFailure.lidFlagOwned == true)
+
+    let status = try rig.service.status()
+    #expect(status.lidClosed.flagSet == false)
+    #expect(rig.flag.clearAttempts == 0)
+
+    let afterStatus = try HoldStore(fileURL: rig.stateFile, snapshotter: StubSnapshotter(table: Rig.table((100, "teainate")))).readState()
+    #expect(afterStatus.lidFlagOwned == false)
+}
+
 @Test func secondLidHoldJoinsAndFlagClearsOnlyAfterTheLast() throws {
     let rig = Rig(table: Rig.table((100, "teainate"), (101, "teainate")))
     let first = try rig.service.on(rig.lid())
@@ -206,6 +231,20 @@ private struct Rig {
     _ = try rig.service.off(id: second.id)
     #expect(rig.flag.clearCount == 1)
     #expect(try rig.service.status().lidClosed.flagSet == false)
+}
+
+@Test func secondFailureLeavesTheFirstLiveHoldAndFlagAlone() throws {
+    // `undo`'s `guard !liveLidHold` exists so a failed *second* attempt never tears
+    // down the flag out from under a still-live first lid-closed hold.
+    let rig = Rig(table: Rig.table((100, "teainate"), (101, "teainate")))
+    let first = try rig.service.on(rig.lid())
+
+    rig.watcher.shouldFail = true
+    #expect(throws: ServiceError.self) { try rig.service.on(rig.lid()) }
+
+    #expect(rig.flag.clearCount == 0)
+    #expect(rig.flag.value == true)
+    #expect(try rig.service.status().holds.map(\.id) == [first.id])
 }
 
 @Test func orphanedFlagIsClearedOnRead() throws {
@@ -235,6 +274,9 @@ private struct Rig {
 
 @Test func staleMarkerWithFlagAlreadyClearIsDroppedWithoutSudo() throws {
     // After a reboot the flag is gone but the marker survived; no clear call is needed.
+    // `failClear = true` would surface as a warning if `clear()` were ever reached —
+    // it deliberately is not, so this also proves the code took the "already clear"
+    // branch rather than the "clear succeeded" branch.
     let rig = Rig(table: [:])
     rig.flag.failClear = true
     try HoldStore(fileURL: rig.stateFile, snapshotter: StubSnapshotter(table: [:]))
@@ -242,6 +284,9 @@ private struct Rig {
     let status = try rig.service.status()
     #expect(status.lidClosed.flagSetBy == nil)
     #expect(status.lidClosed.warning == nil)
+    #expect(rig.flag.clearAttempts == 0)
+    let state = try HoldStore(fileURL: rig.stateFile, snapshotter: StubSnapshotter(table: [:])).readState()
+    #expect(state.lidFlagOwned == false)
 }
 
 @Test func flagSetElsewhereIsReportedNotTouched() throws {
@@ -276,6 +321,20 @@ private struct Rig {
     let status = try rig.service.status()
     #expect(status.lidClosed.enabled == true)
     #expect(status.lidClosed.batteryFloor == 30)
+}
+
+@Test func ordinaryOnAlsoClearsAnOrphanedFlag() throws {
+    // "Every read reconciles" (CLAUDE.md) applies to the flag marker too — an ordinary,
+    // non-lid-closed `on` must not leave a stale flag/marker sitting there just because
+    // the caller didn't ask for a lid-closed hold this time.
+    let rig = Rig()
+    rig.flag.value = true
+    try HoldStore(fileURL: rig.stateFile, snapshotter: StubSnapshotter(table: Rig.table((100, "teainate"))))
+        .mutateState { $0.lidFlagOwned = true }
+
+    _ = try rig.service.on(HoldOptions(source: .cli))
+
+    #expect(rig.flag.clearCount == 1)
 }
 
 @Test func lidClosedUnavailableWithoutDependencies() {
