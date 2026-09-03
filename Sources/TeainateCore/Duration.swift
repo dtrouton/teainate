@@ -48,3 +48,19 @@ public func parseDuration(_ text: String) throws -> TimeInterval {
     guard seconds <= maxDurationSeconds else { throw DurationParseError.tooLong(text) }
     return seconds
 }
+
+/// CLI lid-closed holds are bounded. A human at the menu can go indefinite, because
+/// the battery floor is their limit; an unattended command line gets a hard cap.
+public let maxLidClosedHours: Int = 8
+public let maxLidClosedDurationSeconds: TimeInterval = TimeInterval(maxLidClosedHours) * 3600
+
+/// nil when a CLI `--lid-closed` request is acceptable; otherwise the message to refuse it with.
+public func lidClosedCommandLineProblem(duration: TimeInterval?, hasLifetime: Bool) -> String? {
+    if !hasLifetime {
+        return "--lid-closed needs --for, --session, or --until-pid. Indefinite lid-closed holds are menu-only."
+    }
+    if let duration, duration > maxLidClosedDurationSeconds {
+        return "Lid-closed holds are limited to \(maxLidClosedHours) hours from the command line."
+    }
+    return nil
+}
