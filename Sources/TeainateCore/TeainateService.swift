@@ -5,6 +5,31 @@ public enum ServiceError: Error, Equatable {
     case spawnFailed(String)
 }
 
+public protocol WatcherSpawning: Sendable {
+    func spawnWatcher(executable: URL, arguments: [String]) throws -> pid_t
+}
+
+/// Runs the CLI binary as `lid-watch`. Like caffeinate, the child is left to outlive
+/// us; it reparents to launchd and keeps supervising after the CLI exits.
+public struct SystemWatcherSpawner: WatcherSpawning {
+    public init() {}
+
+    public func spawnWatcher(executable: URL, arguments: [String]) throws -> pid_t {
+        let process = Process()
+        process.executableURL = executable
+        process.arguments = arguments
+        process.standardInput = FileHandle.nullDevice
+        process.standardOutput = FileHandle.nullDevice
+        process.standardError = FileHandle.nullDevice
+        do {
+            try process.run()
+        } catch {
+            throw ServiceError.spawnFailed(error.localizedDescription)
+        }
+        return process.processIdentifier
+    }
+}
+
 /// See `TeainateService.classifyOff`.
 public enum OffOutcome: Equatable {
     case released([Hold])
