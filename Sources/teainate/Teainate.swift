@@ -167,21 +167,27 @@ struct LidWatch: ParsableCommand {
             holdID: id, floor: floor, watchedPID: watchPid, acOnly: acOnly,
             caffeinateFlags: caffeinate.split(separator: " ").map(String.init), label: label
         )
-        _ = runner.run(config, ownPID: getpid(), stop: stop)
-        withExtendedLifetime(sources) {}
+        withExtendedLifetime(sources) {
+            _ = runner.run(config, ownPID: getpid(), stop: stop)
+        }
     }
 }
 
+/// Appends one line to the shared watcher log. Several lid-closed holds can run
+/// concurrently, each with its own watcher process appending to the same file, so the
+/// write must be atomic across processes: `O_APPEND` guarantees the kernel places each
+/// write at the file's current end as one operation, which a seek-then-write pair (two
+/// separate syscalls) cannot.
 private func appendLogLine(_ line: String, to url: URL) {
     let stamped = "\(ISO8601DateFormatter().string(from: Date())) \(line)\n"
     guard let data = stamped.data(using: .utf8) else { return }
-    if let handle = try? FileHandle(forWritingTo: url) {
-        defer { try? handle.close() }
-        _ = try? handle.seekToEnd()
-        try? handle.write(contentsOf: data)
-    } else {
-        try? FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
-        try? data.write(to: url)
+    try? FileManager.default.createDirectory(
+        at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+    let fd = open(url.path, O_WRONLY | O_APPEND | O_CREAT, 0o644)
+    guard fd >= 0 else { return }
+    defer { close(fd) }
+    data.withUnsafeBytes { raw in
+        _ = write(fd, raw.baseAddress, raw.count)
     }
 }
 

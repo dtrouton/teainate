@@ -71,7 +71,9 @@ public struct LidWatchConfig: Sendable, Equatable {
 }
 
 /// Command line for `teainate lid-watch`. Caffeinate flags travel as one space-joined
-/// option value so ArgumentParser never has to see `-i` as a flag of its own.
+/// option value; the `lid-watch` command parses `--caffeinate` with ArgumentParser's
+/// `.unconditional` strategy so a value starting with `-` (e.g. `-i -t 20`) is still
+/// accepted as the option's value rather than misread as another flag.
 public func lidWatchArguments(_ config: LidWatchConfig, stateFile: URL) -> [String] {
     var args = [
         lidWatchCommandName,
