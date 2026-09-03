@@ -6,8 +6,12 @@ private final class FakeFlag: SleepFlagControlling, @unchecked Sendable {
     var setCount = 0
     var clearCount = 0
     var failClear = false
+    var failSet = false
     var value = true
-    func set() throws { setCount += 1; value = true }
+    func set() throws {
+        if failSet { throw SleepFlagError.commandFailed(status: 1, message: "no grant") }
+        setCount += 1; value = true
+    }
     func clear() throws {
         if failClear { throw SleepFlagError.commandFailed(status: 1, message: "no grant") }
         clearCount += 1; value = false
@@ -30,7 +34,11 @@ private final class ScriptedLiveness: ProcessLiveness, @unchecked Sendable {
 private final class RecordingSpawner: CaffeinateSpawning, @unchecked Sendable {
     var spawned: [[String]] = []
     var terminated: [pid_t] = []
-    func spawn(flags: [String]) throws -> pid_t { spawned.append(flags); return 900 }
+    var shouldFail = false
+    func spawn(flags: [String]) throws -> pid_t {
+        if shouldFail { throw ServiceError.spawnFailed("boom") }
+        spawned.append(flags); return 900
+    }
     func terminate(pid: pid_t) { terminated.append(pid) }
 }
 
@@ -175,4 +183,31 @@ private struct Harness {
     let reason = h.runner(liveness: ScriptedLiveness([900: [true], 777: [false]]))
         .run(config, ownPID: watcherPID, stop: StopFlag())
     #expect(reason == .watchedProcessExited)
+}
+
+@Test func startupSetFailureIsLoggedAndNonFatal() {
+    let h = Harness(table: Harness.table((watcherPID, "teainate")))
+    h.flag.failSet = true
+    let reason = h.runner(liveness: ScriptedLiveness([900: [false]])).run(h.config, ownPID: watcherPID, stop: StopFlag())
+    #expect(reason == .timerExpired)
+    #expect(h.spawner.spawned.count == 1)
+    #expect(h.logged.lines.contains { $0.contains("could not re-set sleep flag") })
+}
+
+@Test func spawnFailureEndsWithCaffeinateFailed() throws {
+    let h = Harness(table: Harness.table((watcherPID, "teainate")))
+    h.spawner.shouldFail = true
+    try h.store.mutateState { $0.holds.append(lidHold("h_1", pid: watcherPID)); $0.lidFlagOwned = true }
+
+    let reason = h.runner(liveness: ScriptedLiveness([900: [false]])).run(h.config, ownPID: watcherPID, stop: StopFlag())
+
+    guard case .caffeinateFailed = reason else {
+        Issue.record("expected .caffeinateFailed, got \(reason)")
+        return
+    }
+    #expect(h.spawner.terminated.isEmpty)
+    let state = try h.store.readState()
+    #expect(state.holds.isEmpty)
+    #expect(state.lastEnded == nil)
+    #expect(h.logged.lines.contains { $0.contains("ended: could not start caffeinate") })
 }
