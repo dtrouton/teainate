@@ -49,7 +49,9 @@ Two findings from the target machine (Apple M4, macOS 26.5) shaped the design:
    on/off switch would stomp them.
 
 An earlier draft of this design claimed `caffeinate` cannot keep a MacBook awake
-with the lid closed. That is false on Apple Silicon and has been removed.
+with the lid closed. That claim was removed as false, wrongly: closing the lid is
+an explicit sleep request that no power assertion overrides. See
+`2026-09-03-lid-closed-holds-design.md` for the mechanism that does work.
 
 ## Architecture
 
