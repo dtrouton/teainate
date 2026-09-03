@@ -7,23 +7,28 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var statusItem: NSStatusItem!
     private var renderer: MenuRenderer!
     private var preferences = MenuPreferences()
-    private let service = TeainateService.standard()
     private let paths = TeainatePaths.standard()
+    private var cliPath: URL {
+        Bundle.main.bundleURL.appendingPathComponent("Contents/MacOS/teainate")
+    }
+    private lazy var service = TeainateService.standard(paths: paths, watcherExecutable: cliPath)
     private var refreshTimer: Timer?
+    private var lastReportedEnded: Date?
+    private let grant = SudoersGrant()
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         renderer = MenuRenderer { [weak self] action in self?.handle(action) }
+
+        // Do not alert about a hold that ended before this launch.
+        lastReportedEnded = (try? service.status())?.lidClosed.lastEnded?.at
+
         refresh()
 
         // Keeps the icon and countdown honest when holds expire on their own.
         refreshTimer = Timer.scheduledTimer(withTimeInterval: 15, repeats: true) { [weak self] _ in
             Task { @MainActor in self?.refresh() }
         }
-    }
-
-    private var cliPath: URL {
-        Bundle.main.bundleURL.appendingPathComponent("Contents/MacOS/teainate")
     }
 
     private func refresh() {
@@ -36,6 +41,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         statusItem.menu = renderer.render(
             buildMenu(status: status, preferences: preferences, skillState: skillState)
         )
+
+        if let ended = status.lidClosed.lastEnded, ended.at != lastReportedEnded {
+            lastReportedEnded = ended.at
+            let name = ended.label.map { " (\($0))" } ?? ""
+            present(error: "Lid-closed hold\(name) ended early.", detail: ended.reason)
+        }
     }
 
     private func handle(_ action: MenuAction) {
@@ -58,8 +69,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             installSkill()
         case .quit:
             NSApp.terminate(nil)
-        case .toggleLidClosed, .enableLidClosed, .disableLidClosed, .setBatteryFloor:
-            break // Wired up in Task 14.
+        case .toggleLidClosed:
+            preferences.lidClosed.toggle()
+        case .enableLidClosed:
+            runAsAdmin(script: { try grant.installScript() }, failure: "Could not enable lid-closed holds.")
+        case .disableLidClosed:
+            runAsAdmin(script: { try grant.removeScript() }, failure: "Could not disable lid-closed holds.")
+        case .setBatteryFloor(let floor):
+            do { try SettingsStore(fileURL: paths.settingsFile).write(Settings(batteryFloor: floor)) }
+            catch { present(error: "Could not save the battery floor.", detail: "\(error)") }
         case .none:
             break
         }
@@ -72,10 +90,37 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 duration: duration,
                 acOnly: preferences.acOnly,
                 display: preferences.display,
+                lidClosed: preferences.lidClosed,
                 source: .menu
             ))
         } catch {
             present(error: "Could not start the hold.", detail: error.localizedDescription)
+        }
+    }
+
+    /// The only privileged code in the app: one admin dialog running a Core-generated
+    /// shell script. Everything at runtime goes through `sudo -n` and the grant.
+    private func runAsAdmin(script: () throws -> String, failure: String) {
+        do {
+            let shell = try script()
+            let escaped = shell
+                .replacingOccurrences(of: "\\", with: "\\\\")
+                .replacingOccurrences(of: "\"", with: "\\\"")
+            let source = "do shell script \"\(escaped)\" with administrator privileges"
+            var error: NSDictionary?
+            guard let apple = NSAppleScript(source: source) else {
+                present(error: failure, detail: "Could not build the admin script."); return
+            }
+            apple.executeAndReturnError(&error)
+            if let error {
+                let message = error[NSAppleScript.errorMessage] as? String ?? "\(error)"
+                // -128 is the user cancelling the dialog: not an error worth an alert.
+                if (error[NSAppleScript.errorNumber] as? Int) != -128 {
+                    present(error: failure, detail: message)
+                }
+            }
+        } catch {
+            present(error: failure, detail: "\(error)")
         }
     }
 
