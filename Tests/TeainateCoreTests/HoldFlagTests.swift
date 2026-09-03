@@ -69,3 +69,17 @@ private func opts(
 @Test func idHasReadablePrefix() {
     #expect(makeHoldID(random: { 0x3f2a }) == "h_00003f2a")
 }
+
+// A lid-closed hold's caffeinate is spawned by the watcher, which needs the single
+// `-w` slot for its own pid. The user's watched process is polled by the watcher instead.
+@Test func lidClosedFlagsOmitTheWatchedPID() {
+    var options = opts(watchedPID: 6707)
+    options.lidClosed = true
+    #expect(caffeinateFlags(for: options) == ["-i"])
+}
+
+@Test func lidClosedKeepsTimerAndDisplayFlags() {
+    var options = opts(duration: 600, display: true)
+    options.lidClosed = true
+    #expect(caffeinateFlags(for: options) == ["-i", "-d", "-t", "600"])
+}

@@ -27,19 +27,29 @@ public struct HoldStore: Sendable {
     }
 
     public func read() throws -> [Hold] {
-        try mutate { $0 }
+        try readState().holds
+    }
+
+    public func readState() throws -> StoreState {
+        try mutateState { $0 }
+    }
+
+    /// Holds-only view for callers that do not care about the lid-closed marker.
+    public func mutate<T>(_ body: (inout [Hold]) throws -> T) throws -> T {
+        try mutateState { try body(&$0.holds) }
     }
 
     /// Reconciles, applies `body`, and persists — all under an exclusive lock so the
-    /// app and CLI cannot interleave a read-modify-write.
-    public func mutate<T>(_ body: (inout [Hold]) throws -> T) throws -> T {
+    /// app, the CLI and every watcher cannot interleave a read-modify-write.
+    public func mutateState<T>(_ body: (inout StoreState) throws -> T) throws -> T {
         try ensureDirectoryExists()
         let descriptor = try acquireLock()
         defer { flock(descriptor, LOCK_UN); close(descriptor) }
 
-        var holds = reconcile(loadRaw(), against: try snapshotter.snapshot())
-        let result = try body(&holds)
-        try persist(holds)
+        var state = loadRaw()
+        state.holds = reconcile(state.holds, against: try snapshotter.snapshot())
+        let result = try body(&state)
+        try persist(state)
         return result
     }
 
@@ -70,21 +80,21 @@ public struct HoldStore: Sendable {
         return descriptor
     }
 
-    private func loadRaw() -> [Hold] {
-        guard let data = try? Data(contentsOf: fileURL), !data.isEmpty else { return [] }
+    private func loadRaw() -> StoreState {
+        guard let data = try? Data(contentsOf: fileURL), !data.isEmpty else { return StoreState() }
         do {
-            return try Hold.decoder.decode([Hold].self, from: data)
+            return try Hold.decoder.decode(StoreState.self, from: data)
         } catch {
             // Never crash over a bad file: preserve it for diagnosis and start clean.
             let backup = fileURL.appendingPathExtension("bak")
             try? FileManager.default.removeItem(at: backup)
             try? FileManager.default.moveItem(at: fileURL, to: backup)
-            return []
+            return StoreState()
         }
     }
 
-    private func persist(_ holds: [Hold]) throws {
-        let data = try Hold.encoder.encode(holds)
+    private func persist(_ state: StoreState) throws {
+        let data = try Hold.encoder.encode(state)
         try data.write(to: fileURL, options: .atomic)
     }
 }

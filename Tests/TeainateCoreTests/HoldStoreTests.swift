@@ -107,6 +107,53 @@ private func tempFile() -> URL {
     #expect(kept.map(\.id) == ["a"])
 }
 
+@Test func oldArrayShapedStateFileStillLoads() throws {
+    let url = tempFile()
+    try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+    let legacy = """
+    [{"ac_only":false,"caffeinate_pid":100,"display":false,"flags":["-i"],"id":"a",
+      "kind":"forever","source":"cli","started_at":"1970-01-01T00:00:00Z"}]
+    """
+    try legacy.write(to: url, atomically: true, encoding: .utf8)
+    let store = HoldStore(fileURL: url, snapshotter: FakeSnapshotter(table: table((100, "caffeinate"))))
+
+    let state = try store.readState()
+    #expect(state.holds.map(\.id) == ["a"])
+    #expect(state.holds.first?.lidClosed == false)
+    #expect(state.holds.first?.batteryFloor == nil)
+    #expect(state.lidFlagOwned == false)
+    #expect(state.lastEnded == nil)
+}
+
+@Test func statePersistsAsObjectWithMarkerAndLastEnded() throws {
+    let url = tempFile()
+    let store = HoldStore(fileURL: url, snapshotter: FakeSnapshotter(table: [:]))
+    let ended = EndedHold(id: "h_x", label: "build", reason: "battery 14% at floor 15%",
+                          at: Date(timeIntervalSince1970: 1_000))
+    try store.mutateState { state in
+        state.lidFlagOwned = true
+        state.lastEnded = ended
+    }
+    let raw = try String(contentsOf: url, encoding: .utf8)
+    #expect(raw.contains("\"lid_flag_owned\" : true"))
+    #expect(raw.contains("\"last_ended\""))
+
+    let reread = try store.readState()
+    #expect(reread.lidFlagOwned == true)
+    #expect(reread.lastEnded == ended)
+}
+
+@Test func lidClosedHoldRoundTripsItsFields() throws {
+    let store = HoldStore(fileURL: tempFile(), snapshotter: FakeSnapshotter(table: table((100, "teainate"))))
+    var lid = hold("l", pid: 100)
+    lid.lidClosed = true
+    lid.batteryFloor = 20
+    try store.mutate { $0.append(lid) }
+    let back = try store.read().first
+    #expect(back?.lidClosed == true)
+    #expect(back?.batteryFloor == 20)
+}
+
 @Test func concurrentMutationsDoNotLoseWrites() async throws {
     let url = tempFile()
     var live: [pid_t: ProcessSnapshot] = [:]
