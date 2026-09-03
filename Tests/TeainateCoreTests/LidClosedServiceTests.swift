@@ -62,10 +62,18 @@ private struct StubAssertions: AssertionReading {
     func assertions() throws -> [ForeignAssertion] { value }
 }
 
+/// A mutable time source the Rig's `now` closure captures by reference, so a test can
+/// advance the clock (e.g. past `lidFlagGracePeriod`) after the service is constructed.
+private final class Clock: @unchecked Sendable {
+    var time = Date(timeIntervalSince1970: 1_000_000)
+    func advance(by seconds: TimeInterval) { time = time.addingTimeInterval(seconds) }
+}
+
 private struct Rig {
     let flag = FakeFlag()
     let watcher = RecordingWatcherSpawner()
     let spawner = RecordingSpawner()
+    let clock = Clock()
     let stateFile: URL
     let settings: SettingsStore
     let service: TeainateService
@@ -78,10 +86,11 @@ private struct Rig {
         stateFile = dir.appendingPathComponent("holds.json")
         settings = SettingsStore(fileURL: dir.appendingPathComponent("settings.json"))
         let snap = StubSnapshotter(table: table)
+        let clock = self.clock
         service = TeainateService(
             store: HoldStore(fileURL: stateFile, snapshotter: storeSnapshotter ?? snap),
             spawner: spawner, assertionReader: StubAssertions(value: foreign), snapshotter: snap,
-            now: { Date(timeIntervalSince1970: 1_000_000) },
+            now: { clock.time },
             lidClosed: LidClosedDependencies(
                 flag: flag, grant: FakeGrant(granted: grant), battery: StubBattery(state: battery),
                 settings: settings, watcherSpawner: watcher,
@@ -164,6 +173,18 @@ private struct Rig {
     #expect(state.holds.map(\.id) == [hold.id])
 }
 
+@Test func recordingTheHoldClearsThePendingStamp() throws {
+    // The stamp exists to shield an `on` still in flight from orphan cleanup; once the
+    // hold is recorded there is nothing left in flight, so it must not linger and start
+    // a fresh grace window the next time an orphan really does need cleaning up.
+    let rig = Rig()
+
+    _ = try rig.service.on(rig.lid())
+
+    let state = try HoldStore(fileURL: rig.stateFile, snapshotter: StubSnapshotter(table: Rig.table((100, "teainate")))).readState()
+    #expect(state.lidFlagPendingSince == nil)
+}
+
 @Test func failedWatcherSpawnClearsFlagAndRecordsNothing() throws {
     let rig = Rig()
     rig.watcher.shouldFail = true
@@ -211,6 +232,10 @@ private struct Rig {
     let afterFailure = try HoldStore(fileURL: rig.stateFile, snapshotter: StubSnapshotter(table: Rig.table((100, "teainate")))).readState()
     #expect(afterFailure.lidFlagOwned == true)
 
+    // The failed attempt's pending stamp would otherwise hold orphan cleanup off for
+    // `lidFlagGracePeriod` — advance past it so this `status()` call actually exercises
+    // cleanup rather than just the grace-period guard (covered separately below).
+    rig.clock.advance(by: rig.service.lidFlagGracePeriod + 1)
     let status = try rig.service.status()
     #expect(status.lidClosed.flagSet == false)
     #expect(rig.flag.clearAttempts == 0)
@@ -245,6 +270,44 @@ private struct Rig {
     #expect(rig.flag.clearCount == 0)
     #expect(rig.flag.value == true)
     #expect(try rig.service.status().holds.map(\.id) == [first.id])
+}
+
+@Test func orphanCleanupWaitsWhileAnOnIsInFlight() throws {
+    // A fresh pending stamp looks exactly like the orphan signature (marker true, no
+    // live hold, flag set) — that's the point: cleanup must not act on it within the
+    // grace period, or it could clear the flag out from under an `on` still setting up.
+    let rig = Rig(table: [:])
+    rig.flag.value = true
+    try HoldStore(fileURL: rig.stateFile, snapshotter: StubSnapshotter(table: [:]))
+        .mutateState { state in
+            state.lidFlagOwned = true
+            state.lidFlagPendingSince = rig.clock.time
+        }
+
+    let status = try rig.service.status()
+
+    #expect(rig.flag.clearAttempts == 0)
+    #expect(status.lidClosed.flagSetBy == "teainate")
+    let state = try HoldStore(fileURL: rig.stateFile, snapshotter: StubSnapshotter(table: [:])).readState()
+    #expect(state.lidFlagOwned == true)
+}
+
+@Test func orphanCleanupProceedsAfterTheGrace() throws {
+    let rig = Rig(table: [:])
+    rig.flag.value = true
+    try HoldStore(fileURL: rig.stateFile, snapshotter: StubSnapshotter(table: [:]))
+        .mutateState { state in
+            state.lidFlagOwned = true
+            state.lidFlagPendingSince = rig.clock.time.addingTimeInterval(-(rig.service.lidFlagGracePeriod + 1))
+        }
+
+    let status = try rig.service.status()
+
+    #expect(rig.flag.clearAttempts == 1)
+    #expect(status.lidClosed.flagSet == false)
+    let state = try HoldStore(fileURL: rig.stateFile, snapshotter: StubSnapshotter(table: [:])).readState()
+    #expect(state.lidFlagOwned == false)
+    #expect(state.lidFlagPendingSince == nil)
 }
 
 @Test func orphanedFlagIsClearedOnRead() throws {

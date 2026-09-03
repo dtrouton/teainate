@@ -151,6 +151,7 @@ private func lidHold(_ id: String, pid: pid_t) -> Hold {
     #expect(state.holds.first?.lidClosed == false)
     #expect(state.holds.first?.batteryFloor == nil)
     #expect(state.lidFlagOwned == false)
+    #expect(state.lidFlagPendingSince == nil)
     #expect(state.lastEnded == nil)
 }
 
@@ -159,16 +160,20 @@ private func lidHold(_ id: String, pid: pid_t) -> Hold {
     let store = HoldStore(fileURL: url, snapshotter: FakeSnapshotter(table: [:]))
     let ended = EndedHold(id: "h_x", label: "build", reason: "battery 14% at floor 15%",
                           at: Date(timeIntervalSince1970: 1_000))
+    let pending = Date(timeIntervalSince1970: 900)
     try store.mutateState { state in
         state.lidFlagOwned = true
+        state.lidFlagPendingSince = pending
         state.lastEnded = ended
     }
     let raw = try String(contentsOf: url, encoding: .utf8)
     #expect(raw.contains("\"lid_flag_owned\" : true"))
+    #expect(raw.contains("\"lid_flag_pending_since\""))
     #expect(raw.contains("\"last_ended\""))
 
     let reread = try store.readState()
     #expect(reread.lidFlagOwned == true)
+    #expect(reread.lidFlagPendingSince == pending)
     #expect(reread.lastEnded == ended)
 }
 

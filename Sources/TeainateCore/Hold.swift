@@ -168,22 +168,31 @@ public struct EndedHold: Codable, Sendable, Equatable {
     }
 }
 
-/// Everything in `holds.json`. `lidFlagOwned` is true while teainate believes it set the
-/// kernel sleep-disabled flag; it is the fact orphan cleanup keys off.
+/// Everything in `holds.json`. `lidFlagOwned` is true while teainate may have set the
+/// kernel sleep-disabled flag; it is the fact orphan cleanup keys off. `lidFlagPendingSince`
+/// is set alongside it while an `on` is still in flight (see `TeainateService.lidFlagGracePeriod`)
+/// so orphan cleanup running on another process or the app's refresh timer does not mistake
+/// a hold that is still being set up for an orphan and clear the flag out from under it.
 public struct StoreState: Codable, Sendable, Equatable {
     public var holds: [Hold]
     public var lidFlagOwned: Bool
+    public var lidFlagPendingSince: Date?
     public var lastEnded: EndedHold?
 
-    public init(holds: [Hold] = [], lidFlagOwned: Bool = false, lastEnded: EndedHold? = nil) {
+    public init(
+        holds: [Hold] = [], lidFlagOwned: Bool = false, lidFlagPendingSince: Date? = nil,
+        lastEnded: EndedHold? = nil
+    ) {
         self.holds = holds
         self.lidFlagOwned = lidFlagOwned
+        self.lidFlagPendingSince = lidFlagPendingSince
         self.lastEnded = lastEnded
     }
 
     enum CodingKeys: String, CodingKey {
         case holds
         case lidFlagOwned = "lid_flag_owned"
+        case lidFlagPendingSince = "lid_flag_pending_since"
         case lastEnded = "last_ended"
     }
 
@@ -193,10 +202,12 @@ public struct StoreState: Codable, Sendable, Equatable {
            c.contains(.holds) {
             holds = try c.decode([Hold].self, forKey: .holds)
             lidFlagOwned = try c.decodeIfPresent(Bool.self, forKey: .lidFlagOwned) ?? false
+            lidFlagPendingSince = try c.decodeIfPresent(Date.self, forKey: .lidFlagPendingSince)
             lastEnded = try c.decodeIfPresent(EndedHold.self, forKey: .lastEnded)
         } else {
             holds = try decoder.singleValueContainer().decode([Hold].self)
             lidFlagOwned = false
+            lidFlagPendingSince = nil
             lastEnded = nil
         }
     }

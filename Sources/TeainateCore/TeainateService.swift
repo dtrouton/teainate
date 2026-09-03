@@ -277,6 +277,14 @@ public struct TeainateService: Sendable {
         // looks like it was set outside teainate. mutateState never persists when its
         // body throws, so a failed check below still leaves nothing touched.
         //
+        // The pending stamp closes a race the marker alone leaves open: this call
+        // releases the lock between here and the final record below, so another
+        // process's `clearOrphanedFlag` (the app's refresh timer, another CLI call)
+        // could otherwise see "marker true, no live hold, flag set" — the orphan
+        // signature — and clear the flag while this `on` is still in flight, which
+        // would make it return success with the kernel flag actually off. A fresh
+        // stamp holds that cleanup off for `lidFlagGracePeriod`; see `clearOrphanedFlag`.
+        //
         // A live lid-closed hold already owning the flag is why we leave it alone on
         // failure below. A set marker with no live hold instead means a previous
         // attempt here set the flag and got stuck clearing it (see `undo`'s catch) —
@@ -288,6 +296,7 @@ public struct TeainateService: Sendable {
                 throw ServiceError.sleepDisabledElsewhere
             }
             state.lidFlagOwned = true
+            state.lidFlagPendingSince = now()
             return liveLidHold
         }
 
@@ -303,9 +312,19 @@ public struct TeainateService: Sendable {
                 try lid.flag.clear()
             } catch {
                 // Leave the marker set so the next attempt (and `status`) know this
-                // stuck flag is ours, not something set outside teainate.
-                try? store.mutateState { $0.lidFlagOwned = true }
+                // stuck flag is ours, not something set outside teainate. The stamp no
+                // longer means "pending" though — this is a genuine stuck flag now, so
+                // clear it so orphan cleanup reports it immediately instead of waiting
+                // out a grace period that no longer applies.
+                try? store.mutateState { state in
+                    state.lidFlagOwned = true
+                    state.lidFlagPendingSince = nil
+                }
                 return ServiceError.sleepFlagStuck("\(failure); and clearing the sleep flag failed: \(error)")
+            }
+            try? store.mutateState { state in
+                state.lidFlagOwned = false
+                state.lidFlagPendingSince = nil
             }
             return failure
         }
@@ -335,6 +354,7 @@ public struct TeainateService: Sendable {
             try store.mutateState { state in
                 state.holds.append(hold)
                 state.lidFlagOwned = true
+                state.lidFlagPendingSince = nil
             }
         } catch {
             spawner.terminate(pid: pid)
@@ -343,16 +363,33 @@ public struct TeainateService: Sendable {
         return hold
     }
 
-    /// Marker true with no live lid-closed hold means a watcher died without cleaning
-    /// up. If the flag is still set, clear it; if clearing fails the marker stays so
-    /// `status` keeps warning. If the flag is already clear (a reboot), just drop the marker.
+    /// How long an in-flight `on` gets before orphan cleanup elsewhere (another
+    /// process, or the app's periodic refresh) is allowed to treat `lidFlagPendingSince`
+    /// as a crashed attempt rather than one still setting up. `onLidClosed` persists the
+    /// marker before it makes the privileged `set()` call and spawns the watcher, both
+    /// of which happen with the store lock released — without this grace, cleanup
+    /// running in that window would see "marker true, no live hold, flag set", the
+    /// orphan signature, and clear the flag out from under an `on` call that is still
+    /// in progress.
+    public let lidFlagGracePeriod: TimeInterval = 60
+
+    /// Marker true with no live lid-closed hold means either an `on` call still setting
+    /// up (see `lidFlagGracePeriod`) or a watcher that died without cleaning up. Past the
+    /// grace period: if the flag is still set, clear it; if clearing fails the marker
+    /// stays so `status` keeps warning. If the flag is already clear (a reboot), just
+    /// drop the marker.
     private func clearOrphanedFlag() throws {
         guard let lid = lidClosed else { return }
         try store.mutateState { state in
             guard state.lidFlagOwned, !state.holds.contains(where: \.lidClosed) else { return }
+            if let pending = state.lidFlagPendingSince,
+               now().timeIntervalSince(pending) < lidFlagGracePeriod {
+                return
+            }
             let flagSet = (try? lid.flag.isSet()) ?? true
             if !flagSet || (try? lid.flag.clear()) != nil {
                 state.lidFlagOwned = false
+                state.lidFlagPendingSince = nil
             }
         }
     }

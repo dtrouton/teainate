@@ -128,10 +128,23 @@ explicitly: that is the one outcome that leaves the Mac unable to sleep.
 ### Ownership marker and orphan cleanup
 
 `holds.json` gains one top-level boolean, `lid_flag_owned`, true while
-teainate may have set the flag. On every read, after reconciliation:
+teainate may have set the flag, and one nullable timestamp,
+`lid_flag_pending_since`, set alongside it while an `on` call for a lid-closed
+hold is still in flight (step 2 above). On every read, after reconciliation:
 
-- Marker true, no live lid-closed hold: the flag was orphaned by a SIGKILLed
-  watcher or a crash. Clear the flag (needs the grant) and the marker.
+- Marker true, no live lid-closed hold, and the pending stamp is either unset
+  or older than a 60-second grace period: the flag was orphaned by a
+  SIGKILLed watcher or a crash. Clear the flag (needs the grant) and the
+  marker.
+- Marker true, no live lid-closed hold, and the pending stamp is within the
+  grace period: an `on` call elsewhere (another process, or the app's
+  periodic refresh) is still setting the flag up. Touch nothing and let it
+  finish — clearing here would otherwise race that `on` call, which sets the
+  marker before the privileged `pmset` call and the watcher spawn, both of
+  which happen with the state file's lock released.
+- Marker true, no live lid-closed hold, flag already clear: drop the marker
+  for free, without a `pmset`/`sudo` call — this is what a reboot (or a failed
+  `sudo -n` call that never actually set the flag) looks like on the next read.
 - Marker false, flag set: something outside teainate set it. Report it in
   `status`. Never touch it — the same rule as untracked `caffeinate` processes.
 
