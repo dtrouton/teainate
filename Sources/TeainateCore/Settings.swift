@@ -32,10 +32,11 @@ public struct SettingsStore: Sendable {
     }
 
     public func read() -> (settings: Settings, warning: String?) {
-        guard let data = try? Data(contentsOf: fileURL), !data.isEmpty else {
+        guard let data = try? Data(contentsOf: fileURL) else {
             return (.default, nil)
         }
-        guard let settings = try? JSONDecoder().decode(Settings.self, from: data) else {
+        guard !data.isEmpty,
+              let settings = try? JSONDecoder().decode(Settings.self, from: data) else {
             return (.default, "settings.json could not be read; using the default battery floor (\(defaultBatteryFloor)%)")
         }
         guard batteryFloorRange.contains(settings.batteryFloor) else {

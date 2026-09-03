@@ -19,6 +19,15 @@ private func tempSettings() -> SettingsStore {
     #expect(store.read().settings.batteryFloor == 30)
 }
 
+@Test func emptyFileFallsBackToDefaultWithWarning() throws {
+    let store = tempSettings()
+    try FileManager.default.createDirectory(at: store.fileURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+    try "".write(to: store.fileURL, atomically: true, encoding: .utf8)
+    let (settings, warning) = store.read()
+    #expect(settings.batteryFloor == 15)
+    #expect(warning?.contains("settings.json") == true)
+}
+
 @Test func invalidJSONFallsBackToDefaultWithWarning() throws {
     let store = tempSettings()
     try FileManager.default.createDirectory(at: store.fileURL.deletingLastPathComponent(), withIntermediateDirectories: true)
