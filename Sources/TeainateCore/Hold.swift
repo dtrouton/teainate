@@ -170,7 +170,7 @@ public struct EndedHold: Codable, Sendable, Equatable {
 
 /// Everything in `holds.json`. `lidFlagOwned` is true while teainate may have set the
 /// kernel sleep-disabled flag; it is the fact orphan cleanup keys off. `lidFlagPendingSince`
-/// is set alongside it while an `on` is still in flight (see `TeainateService.lidFlagGracePeriod`)
+/// is set alongside it while an `on` is still in flight (see `lidFlagGracePeriod`)
 /// so orphan cleanup running on another process or the app's refresh timer does not mistake
 /// a hold that is still being set up for an orphan and clear the flag out from under it.
 public struct StoreState: Codable, Sendable, Equatable {

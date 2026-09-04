@@ -304,19 +304,18 @@ public struct TeainateService: Sendable {
         // would make it return success with the kernel flag actually off. A fresh
         // stamp holds that cleanup off for `lidFlagGracePeriod`; see `clearOrphanedFlag`.
         //
-        // A live lid-closed hold already owning the flag is why we leave it alone on
-        // failure below. A set marker with no live hold instead means a previous
+        // A live lid-closed hold already owning the flag is why `undo` below leaves it
+        // alone on failure. A set marker with no live hold instead means a previous
         // attempt here set the flag and got stuck clearing it (see `undo`'s catch) —
         // that is ours to keep retrying, not "someone else", so it must not trip the
         // sleepDisabledElsewhere check.
-        let liveLidHold = try store.mutateState { state -> Bool in
+        try store.mutateState { state in
             let liveLidHold = state.holds.contains(where: \.lidClosed)
             if !liveLidHold, !state.lidFlagOwned, (try? lid.flag.isSet()) == true {
                 throw ServiceError.sleepDisabledElsewhere
             }
             state.lidFlagOwned = true
             state.lidFlagPendingSince = now()
-            return liveLidHold
         }
 
         do { try lid.flag.set() } catch {
@@ -324,26 +323,35 @@ public struct TeainateService: Sendable {
         }
 
         // From here every failure must put the flag back — unless a live lid-closed
-        // hold owned it before we started.
+        // hold owns it. Whether one does is read fresh under the lock, not the value
+        // from the mutation above: a second `on` can start, see the marker already
+        // true (this call's), and record its own live hold in the syscalls-wide gap
+        // between here and the record below — reusing a stale "no live hold" snapshot
+        // would then let this call's failure clear the flag out from under that second
+        // hold. `lidFlagPendingWithinGrace` is deliberately not consulted here: this
+        // call's own stamp is always fresh, and checking it would block undo from ever
+        // running.
         func undo(_ failure: any Error) -> any Error {
-            guard !liveLidHold else { return failure }
-            do {
-                try lid.flag.clear()
-            } catch {
-                // Leave the marker set so the next attempt (and `status`) know this
-                // stuck flag is ours, not something set outside teainate. The stamp no
-                // longer means "pending" though — this is a genuine stuck flag now, so
-                // clear it so orphan cleanup reports it immediately instead of waiting
-                // out a grace period that no longer applies.
-                try? store.mutateState { state in
+            let clearFailure: (any Error)? = try? store.mutateState { state -> (any Error)? in
+                guard !state.holds.contains(where: \.lidClosed) else { return nil }
+                do {
+                    try lid.flag.clear()
+                    state.lidFlagOwned = false
+                    state.lidFlagPendingSince = nil
+                    return nil
+                } catch {
+                    // Leave the marker set so the next attempt (and `status`) know this
+                    // stuck flag is ours, not something set outside teainate. The stamp
+                    // no longer means "pending" though — this is a genuine stuck flag
+                    // now, so clear it so orphan cleanup reports it immediately instead
+                    // of waiting out a grace period that no longer applies.
                     state.lidFlagOwned = true
                     state.lidFlagPendingSince = nil
+                    return error
                 }
-                return ServiceError.sleepFlagStuck("\(failure); and clearing the sleep flag failed: \(error)")
             }
-            try? store.mutateState { state in
-                state.lidFlagOwned = false
-                state.lidFlagPendingSince = nil
+            if let clearFailure {
+                return ServiceError.sleepFlagStuck("\(failure); and clearing the sleep flag failed: \(clearFailure)")
             }
             return failure
         }

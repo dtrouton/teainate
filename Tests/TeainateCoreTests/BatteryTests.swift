@@ -1,5 +1,4 @@
 import Testing
-import Foundation
 @testable import TeainateCore
 
 // Captured from a MacBook (M4, macOS 26.6) — real output, not a guess.

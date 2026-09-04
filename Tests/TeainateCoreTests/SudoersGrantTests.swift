@@ -38,6 +38,21 @@ private func tempDir() throws -> URL {
     #expect(grant.isGranted() == false)
 }
 
+@Test func grantedWhenFileExistsButIsUnreadable() throws {
+    // The real file is root:wheel mode 0440 — unreadable to a user not in `wheel`, which is
+    // the common case. `isGranted()` must fall back to existence rather than reporting
+    // "not granted" forever; see the doc comment on `isGranted()`.
+    let grant = SudoersGrant(username: "u", directory: try tempDir())
+    try (grant.rule + "\n").write(to: grant.fileURL, atomically: true, encoding: .utf8)
+    try FileManager.default.setAttributes([.posixPermissions: 0o000], ofItemAtPath: grant.fileURL.path)
+    defer {
+        // Restore so the temp directory can be cleaned up afterward.
+        try? FileManager.default.setAttributes([.posixPermissions: 0o644], ofItemAtPath: grant.fileURL.path)
+    }
+
+    #expect(grant.isGranted() == true)
+}
+
 @Test func installScriptValidatesWithVisudoBeforeMoving() throws {
     let script = try SudoersGrant(username: "u", directory: try tempDir()).installScript()
     #expect(script.contains("/usr/sbin/visudo -c -f"))

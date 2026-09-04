@@ -46,9 +46,14 @@ private func decide(
     #expect(decide(child: false, watched: false, battery: BatteryState(source: .battery, percent: 1)) == .timerExpired)
 }
 
-@Test func onlyPowerReasonsCutWorkShort() {
+@Test func powerAndSpawnFailureReasonsCutWorkShort() {
+    // Power reasons and a failed caffeinate spawn are all outcomes the user did not ask
+    // for and was not told about as they happened — they need to surface in
+    // `last_ended`. A timer, a watched process exiting, or an explicit release are the
+    // outcome the user asked for and need no explaining.
     #expect(WatcherEndReason.batteryAtFloor(percent: 14, floor: 15).cutsWorkShort)
     #expect(WatcherEndReason.unpluggedFromAC.cutsWorkShort)
+    #expect(WatcherEndReason.caffeinateFailed("boom").cutsWorkShort)
     #expect(!WatcherEndReason.timerExpired.cutsWorkShort)
     #expect(!WatcherEndReason.watchedProcessExited.cutsWorkShort)
     #expect(!WatcherEndReason.released.cutsWorkShort)

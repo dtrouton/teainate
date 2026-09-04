@@ -248,6 +248,9 @@ private struct Harness {
     #expect(h.spawner.terminated.isEmpty)
     let state = try h.store.readState()
     #expect(state.holds.isEmpty)
-    #expect(state.lastEnded == nil)
+    // The CLI already printed "Holding the Mac awake" before this failure — it must
+    // leave a trace in `last_ended`, not disappear silently.
+    #expect(state.lastEnded?.id == "h_1")
+    #expect(state.lastEnded?.reason.hasPrefix("could not start caffeinate") == true)
     #expect(h.logged.lines.contains { $0.contains("ended: could not start caffeinate") })
 }

@@ -38,7 +38,13 @@ private final class RecordingWatcherSpawner: WatcherSpawning, @unchecked Sendabl
     var launches: [(URL, [String])] = []
     var nextPID: pid_t = 100
     var shouldFail = false
+    /// Fired at the start of every `spawnWatcher` call, before the `shouldFail` check —
+    /// lets a test inject a store write exactly in the window this call represents, to
+    /// simulate a concurrent process's `on` call landing its own hold in the gap between
+    /// this call's own pre-flight read and this call's own failure.
+    var onSpawn: (() -> Void)?
     func spawnWatcher(executable: URL, arguments: [String]) throws -> pid_t {
+        onSpawn?()
         if shouldFail { throw ServiceError.spawnFailed("boom") }
         launches.append((executable, arguments))
         defer { nextPID += 1 }
@@ -259,8 +265,10 @@ private struct Rig {
 }
 
 @Test func secondFailureLeavesTheFirstLiveHoldAndFlagAlone() throws {
-    // `undo`'s `guard !liveLidHold` exists so a failed *second* attempt never tears
-    // down the flag out from under a still-live first lid-closed hold.
+    // `undo`'s guard against a live lid-closed hold exists so a failed *second* attempt
+    // never tears down the flag out from under a still-live first lid-closed hold. Here
+    // the first hold is already live when the second call starts, so this covers the
+    // guard reading a live hold that was there from the beginning.
     let rig = Rig(table: Rig.table((100, "teainate"), (101, "teainate")))
     let first = try rig.service.on(rig.lid())
 
@@ -270,6 +278,38 @@ private struct Rig {
     #expect(rig.flag.clearCount == 0)
     #expect(rig.flag.value == true)
     #expect(try rig.service.status().holds.map(\.id) == [first.id])
+}
+
+@Test func undoRereadsLiveHoldsInsteadOfTrustingItsOwnStaleCapture() throws {
+    // The race this guards against: this call's own pre-flight read captures "no live
+    // lid-closed hold" (nothing has been recorded yet, by anyone) — then, in the gap
+    // before its watcher spawn fails, a concurrent process's `on` call finishes and
+    // records its own live lid-closed hold. `undo` must read the store fresh rather
+    // than trust a value captured before this call even set the flag, or it would clear
+    // the flag out from under that concurrent hold. `onSpawn` stands in for the
+    // concurrent process's write landing in exactly that window.
+    let rig = Rig(table: Rig.table((100, "teainate"), (101, "teainate")))
+    rig.watcher.shouldFail = true
+    rig.watcher.onSpawn = { [stateFile = rig.stateFile] in
+        try? HoldStore(
+            fileURL: stateFile,
+            snapshotter: StubSnapshotter(table: Rig.table((100, "teainate"), (101, "teainate")))
+        ).mutateState { state in
+            state.holds.append(Hold(
+                id: "h_concurrent", kind: .forever, label: nil, source: .cli,
+                caffeinatePID: 101, flags: ["-i"], startedAt: Date(timeIntervalSince1970: 1_000_000),
+                expiresAt: nil, watchedPID: nil, display: false, acOnly: false,
+                lidClosed: true, batteryFloor: 15))
+        }
+    }
+
+    #expect(throws: ServiceError.self) { try rig.service.on(rig.lid()) }
+
+    #expect(rig.flag.clearCount == 0)
+    #expect(rig.flag.value == true)
+    let status = try rig.service.status()
+    #expect(status.lidClosed.flagSetBy == "teainate")
+    #expect(status.holds.map(\.id) == ["h_concurrent"])
 }
 
 @Test func orphanCleanupWaitsWhileAnOnIsInFlight() throws {

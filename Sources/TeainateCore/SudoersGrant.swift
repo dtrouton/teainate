@@ -33,9 +33,19 @@ public struct SudoersGrant: PrivilegeGranting {
         directory.appendingPathComponent("teainate-" + username.replacingOccurrences(of: ".", with: "_"))
     }
 
+    /// `installScript()` writes this file `root:wheel` mode `0440` — sudo rejects any
+    /// looser mode, so that is not negotiable — which on a machine where this user is not
+    /// in `wheel` (the common case) makes it unreadable to them: `open(2)` fails with
+    /// `EACCES`. So an unreadable file is not "not granted", it is "can't check the
+    /// content"; only root can create a file at this per-user path in the first place, so
+    /// its mere existence is a sound proxy for "granted". A wrong-content file (stale rule,
+    /// tampering) still surfaces loudly: `on` calls `sudo -n` regardless, and a rule that
+    /// doesn't match what sudoers expects fails there as `lidClosedGrantBroken`.
     public func isGranted() -> Bool {
-        guard let content = try? String(contentsOf: fileURL, encoding: .utf8) else { return false }
-        return content.trimmingCharacters(in: .whitespacesAndNewlines) == rule
+        if let content = try? String(contentsOf: fileURL, encoding: .utf8) {
+            return content.trimmingCharacters(in: .whitespacesAndNewlines) == rule
+        }
+        return FileManager.default.fileExists(atPath: fileURL.path)
     }
 
     /// Bourne shell, run as root by the app's admin dialog. Writes to a `.tmp` sibling

@@ -23,9 +23,13 @@ public enum WatcherEndReason: Equatable, Sendable {
 
     /// Reasons that cut work short. Only these are recorded in `last_ended`: a timer
     /// or session ending is the outcome the user asked for, not something to explain.
+    /// `caffeinateFailed` belongs here too: the CLI already printed "Holding the Mac
+    /// awake" before the watcher ever tried to spawn its child, so a hold that then
+    /// vanishes without a trace in `last_ended` — nothing outside `lid-watch.log` says
+    /// why — contradicts CLAUDE.md's "failures the user asked for must fail loudly".
     public var cutsWorkShort: Bool {
         switch self {
-        case .unpluggedFromAC, .batteryAtFloor: return true
+        case .unpluggedFromAC, .batteryAtFloor, .caffeinateFailed: return true
         default: return false
         }
     }
@@ -214,6 +218,13 @@ public struct LidWatchRunner: Sendable {
         if let flag = deps.flag {
             do {
                 try deps.store.mutateState { state in
+                    // Deliberately does not also check `state.lidFlagOwned`: `off --all`
+                    // may already have dropped the marker for this hold before this
+                    // watcher noticed and got here, and clearing an already-clear flag is
+                    // idempotent, so there is nothing to protect by skipping it. The
+                    // pending-grace guard below is what protects a joining `on` — the
+                    // marker itself is not a reliable signal here.
+                    //
                     // A fresh `lidFlagPendingSince` means a sibling `on` call is about to
                     // own the flag — its own record just hasn't landed yet, so with this
                     // watcher's hold already removed above, `holds` can briefly show no

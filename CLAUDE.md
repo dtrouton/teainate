@@ -26,10 +26,12 @@ When testing, only ever terminate PIDs your own test spawned, give every spawned
 `caffeinate` a short `-t` backstop, and clean up with `defer` so a failed
 assertion cannot leave the Mac awake.
 
-**Never run `sudo pmset -a disablesleep` from a test, and never construct
-`SudoSleepFlagController` in one.** The real-process watcher test passes `--no-flag`.
-If this machine has the grant, a test that cleared the flag would end a real
-lid-closed hold — possibly one keeping another session alive.
+**Never run `sudo pmset -a disablesleep` from a test, and never call `set()` or
+`clear()` on a real `SudoSleepFlagController` in one.** `isSet()` is unprivileged
+(`pmset -g`, no `sudo`) and fine to call directly. The real-process watcher test
+passes `--no-flag`. If this machine has the grant, a test that called `set()` or
+`clear()` would touch the real flag and could end a real lid-closed hold —
+possibly one keeping another session alive.
 
 ## Three traps that already caused Critical bugs
 

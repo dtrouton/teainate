@@ -2981,7 +2981,7 @@ git commit -m "docs: lid-closed holds in skill, README, CLAUDE.md; bump to 0.2.0
 
 Nothing here can be automated: setting the real flag needs the grant and closing the lid needs a human. Do it on a MacBook, on battery, with nothing else important running.
 
-1. `./scripts/make-app.sh debug && open Teainate.app`, choose **Enable lid-closed holds…**, enter the admin password. `cat /etc/sudoers.d/teainate-$USER` shows the one rule. `pmset -g | grep SleepDisabled` is 0 or absent.
+1. `./scripts/make-app.sh debug && open Teainate.app`, choose **Enable lid-closed holds…**, enter the admin password. `sudo cat /etc/sudoers.d/teainate-$USER` shows the one rule — the file is root:wheel mode 0440, so a plain `cat` fails with "Permission denied" for anyone not in `wheel`. `pmset -g | grep SleepDisabled` is 0 or absent.
 2. On battery above the floor: `.build/debug/teainate on --lid-closed --for 10m --label lidtest`. `pmset -g | grep SleepDisabled` shows 1. `teainate status` shows `lidtest — 10 min left (lid ok, off at 15%)`.
 3. `while sleep 60; do date >> ~/awake.log; done &`, close the lid for ten minutes, open it. `wc -l ~/awake.log` is 10 (±1).
 4. Wait for expiry. `pmset -g | grep SleepDisabled` is 0 or absent; `teainate status` shows no holds; `lid-watch.log` ends with `ended: timer expired`.
