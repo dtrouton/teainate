@@ -214,9 +214,18 @@ public struct LidWatchRunner: Sendable {
         if let flag = deps.flag {
             do {
                 try deps.store.mutateState { state in
-                    guard !state.holds.contains(where: \.lidClosed) else { return }
+                    // A fresh `lidFlagPendingSince` means a sibling `on` call is about to
+                    // own the flag — its own record just hasn't landed yet, so with this
+                    // watcher's hold already removed above, `holds` can briefly show no
+                    // live lid-closed hold even though the flag is not actually orphaned.
+                    // Leave it alone; if that `on` call dies too, orphan cleanup takes the
+                    // flag once the grace period runs out.
+                    guard !state.holds.contains(where: \.lidClosed),
+                          !lidFlagPendingWithinGrace(state, now: deps.now())
+                    else { return }
                     try flag.clear()
                     state.lidFlagOwned = false
+                    state.lidFlagPendingSince = nil
                 }
             } catch {
                 deps.log("\(config.holdID) could not clear sleep flag: \(error)")

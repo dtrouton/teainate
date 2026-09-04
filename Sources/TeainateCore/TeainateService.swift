@@ -14,6 +14,25 @@ public enum ServiceError: Error, Equatable {
     case sleepFlagStuck(String)
 }
 
+/// How long an in-flight `on` gets before orphan cleanup elsewhere (another process, the
+/// app's periodic refresh, or a sibling lid-closed hold's watcher exiting) is allowed to
+/// treat `StoreState.lidFlagPendingSince` as a crashed attempt rather than one still
+/// setting up. `onLidClosed` persists the marker before it makes the privileged `set()`
+/// call and spawns the watcher, both of which happen with the store lock released —
+/// without this grace, cleanup running in that window would see "marker true, no live
+/// hold, flag set", the orphan signature, and clear the flag out from under an `on` call
+/// that is still in progress.
+public let lidFlagGracePeriod: TimeInterval = 60
+
+/// True when a lid-closed `on` call may still be setting up the flag. Shared by
+/// `TeainateService.clearOrphanedFlag` and `LidWatchRunner.finish` — the two places that
+/// otherwise could mistake a `lidFlagOwned` marker with no live lid-closed hold for an
+/// orphan and clear the flag out from under an `on` call still in flight.
+public func lidFlagPendingWithinGrace(_ state: StoreState, now: Date) -> Bool {
+    guard let pending = state.lidFlagPendingSince else { return false }
+    return now.timeIntervalSince(pending) < lidFlagGracePeriod
+}
+
 public protocol WatcherSpawning: Sendable {
     func spawnWatcher(executable: URL, arguments: [String]) throws -> pid_t
 }
@@ -363,16 +382,6 @@ public struct TeainateService: Sendable {
         return hold
     }
 
-    /// How long an in-flight `on` gets before orphan cleanup elsewhere (another
-    /// process, or the app's periodic refresh) is allowed to treat `lidFlagPendingSince`
-    /// as a crashed attempt rather than one still setting up. `onLidClosed` persists the
-    /// marker before it makes the privileged `set()` call and spawns the watcher, both
-    /// of which happen with the store lock released — without this grace, cleanup
-    /// running in that window would see "marker true, no live hold, flag set", the
-    /// orphan signature, and clear the flag out from under an `on` call that is still
-    /// in progress.
-    public let lidFlagGracePeriod: TimeInterval = 60
-
     /// Marker true with no live lid-closed hold means either an `on` call still setting
     /// up (see `lidFlagGracePeriod`) or a watcher that died without cleaning up. Past the
     /// grace period: if the flag is still set, clear it; if clearing fails the marker
@@ -381,11 +390,9 @@ public struct TeainateService: Sendable {
     private func clearOrphanedFlag() throws {
         guard let lid = lidClosed else { return }
         try store.mutateState { state in
-            guard state.lidFlagOwned, !state.holds.contains(where: \.lidClosed) else { return }
-            if let pending = state.lidFlagPendingSince,
-               now().timeIntervalSince(pending) < lidFlagGracePeriod {
-                return
-            }
+            guard state.lidFlagOwned, !state.holds.contains(where: \.lidClosed),
+                  !lidFlagPendingWithinGrace(state, now: now())
+            else { return }
             let flagSet = (try? lid.flag.isSet()) ?? true
             if !flagSet || (try? lid.flag.clear()) != nil {
                 state.lidFlagOwned = false

@@ -235,7 +235,7 @@ private struct Rig {
     // The failed attempt's pending stamp would otherwise hold orphan cleanup off for
     // `lidFlagGracePeriod` — advance past it so this `status()` call actually exercises
     // cleanup rather than just the grace-period guard (covered separately below).
-    rig.clock.advance(by: rig.service.lidFlagGracePeriod + 1)
+    rig.clock.advance(by: lidFlagGracePeriod + 1)
     let status = try rig.service.status()
     #expect(status.lidClosed.flagSet == false)
     #expect(rig.flag.clearAttempts == 0)
@@ -298,7 +298,7 @@ private struct Rig {
     try HoldStore(fileURL: rig.stateFile, snapshotter: StubSnapshotter(table: [:]))
         .mutateState { state in
             state.lidFlagOwned = true
-            state.lidFlagPendingSince = rig.clock.time.addingTimeInterval(-(rig.service.lidFlagGracePeriod + 1))
+            state.lidFlagPendingSince = rig.clock.time.addingTimeInterval(-(lidFlagGracePeriod + 1))
         }
 
     let status = try rig.service.status()

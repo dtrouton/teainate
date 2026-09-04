@@ -157,6 +157,46 @@ private struct Harness {
     #expect(try h.store.readState().lidFlagOwned == true)
 }
 
+@Test func exitLeavesFlagAloneWhileAnOnIsInFlight() throws {
+    // A fresh `lidFlagPendingSince` means a sibling `on` call is mid-flight and has not
+    // recorded its hold yet — with this watcher's own hold removed, `holds` briefly shows
+    // no live lid-closed hold even though the flag is not actually orphaned. `finish` must
+    // not clear it out from under that in-flight call.
+    let h = Harness(table: Harness.table((watcherPID, "teainate")))
+    try h.store.mutateState { state in
+        state.holds.append(lidHold("h_1", pid: watcherPID))
+        state.lidFlagOwned = true
+        state.lidFlagPendingSince = Date(timeIntervalSince1970: 5_000)   // == Harness's `now`
+    }
+
+    let reason = h.runner(liveness: ScriptedLiveness([900: [true, false]]))
+        .run(h.config, ownPID: watcherPID, stop: StopFlag())
+
+    #expect(reason == .timerExpired)
+    let state = try h.store.readState()
+    #expect(state.holds.isEmpty)
+    #expect(h.flag.clearCount == 0)
+    #expect(state.lidFlagOwned == true)
+}
+
+@Test func exitClearsFlagWhenPendingStampIsStale() throws {
+    let h = Harness(table: Harness.table((watcherPID, "teainate")))
+    try h.store.mutateState { state in
+        state.holds.append(lidHold("h_1", pid: watcherPID))
+        state.lidFlagOwned = true
+        state.lidFlagPendingSince = Date(timeIntervalSince1970: 5_000 - 61)   // past the grace
+    }
+
+    let reason = h.runner(liveness: ScriptedLiveness([900: [true, false]]))
+        .run(h.config, ownPID: watcherPID, stop: StopFlag())
+
+    #expect(reason == .timerExpired)
+    let state = try h.store.readState()
+    #expect(h.flag.clearCount == 1)
+    #expect(state.lidFlagOwned == false)
+    #expect(state.lidFlagPendingSince == nil)
+}
+
 @Test func failedClearLeavesMarkerForOrphanCleanup() throws {
     let h = Harness(table: Harness.table((watcherPID, "teainate")))
     h.flag.failClear = true
