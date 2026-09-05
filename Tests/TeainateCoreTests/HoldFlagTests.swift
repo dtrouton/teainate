@@ -83,3 +83,10 @@ private func opts(
     options.lidClosed = true
     #expect(caffeinateFlags(for: options) == ["-i", "-d", "-t", "600"])
 }
+
+// Int(TimeInterval.greatestFiniteMagnitude) traps. The clamp is the backstop for any
+// caller that bypasses parseDuration.
+@Test func absurdDurationIsClampedNotTrapped() {
+    let flags = caffeinateFlags(for: opts(duration: .greatestFiniteMagnitude))
+    #expect(flags == ["-i", "-t", String(Int(maxDurationSeconds))])
+}

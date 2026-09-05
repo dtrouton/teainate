@@ -25,6 +25,8 @@ extension ServiceError: CustomStringConvertible {
             return "Sleep is already disabled outside teainate (pmset disablesleep). An ordinary hold will work with the lid closed until that is cleared."
         case .sleepFlagStuck(let message):
             return "The hold failed and the sleep-disabled flag could not be cleared: \(message). Run: sudo pmset -a disablesleep 0"
+        case .durationTooLong:
+            return "Durations are limited to \(maxDurationDays) days."
         }
     }
 }

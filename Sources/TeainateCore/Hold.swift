@@ -52,7 +52,7 @@ public func caffeinateFlags(for options: HoldOptions) -> [String] {
     var flags = [options.acOnly ? "-s" : "-i"]
     if options.display { flags.append("-d") }
     if let duration = options.duration {
-        flags.append(contentsOf: ["-t", String(Int(duration))])
+        flags.append(contentsOf: ["-t", String(Int(min(duration, maxDurationSeconds)))])
     }
     // The watcher of a lid-closed hold owns caffeinate's single `-w` slot (see
     // `watcherChildFlags`); it polls the user's watched pid itself.

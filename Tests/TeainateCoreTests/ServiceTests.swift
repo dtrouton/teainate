@@ -368,6 +368,13 @@ private func liveTable(_ pids: pid_t...) -> [pid_t: ProcessSnapshot] {
     #expect(try service.status().holds.isEmpty)
 }
 
+@Test func onRefusesDurationAboveTheCap() {
+    let service = makeService(snapshotter: StubSnapshotter(table: liveTable(100)))
+    #expect(throws: ServiceError.durationTooLong) {
+        try service.on(HoldOptions(duration: maxDurationSeconds + 1, source: .cli))
+    }
+}
+
 @Test func statusEncodesSnakeCaseJSON() throws {
     let service = makeService(snapshotter: StubSnapshotter(table: liveTable(100)))
     _ = try service.on(HoldOptions(duration: 60, label: "test", source: .claude))

@@ -12,6 +12,7 @@ public enum ServiceError: Error, Equatable {
     /// The one outcome that leaves the Mac unable to sleep: we set the flag, something
     /// failed, and clearing it failed too. The message carries both errors.
     case sleepFlagStuck(String)
+    case durationTooLong
 }
 
 /// How long an in-flight `on` gets before orphan cleanup elsewhere (another process, the
@@ -257,6 +258,9 @@ public struct TeainateService: Sendable {
     }
 
     public func on(_ options: HoldOptions) throws -> Hold {
+        if let duration = options.duration, duration > maxDurationSeconds {
+            throw ServiceError.durationTooLong
+        }
         if options.lidClosed { return try onLidClosed(options) }
         try clearOrphanedFlag()
 

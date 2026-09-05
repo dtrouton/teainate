@@ -14,7 +14,7 @@ private func isSentence(_ error: any Error) -> Bool {
         .noClaudeAncestor, .spawnFailed("boom"), .lidClosedUnavailable, .lidClosedNotEnabled,
         .lidClosedGrantBroken("sudo: a password is required"),
         .batteryBelowFloor(percent: 12, floor: 15), .notOnACPower, .sleepDisabledElsewhere,
-        .sleepFlagStuck("x"),
+        .sleepFlagStuck("x"), .durationTooLong,
     ]
     for error in cases { #expect(isSentence(error), "\(error)") }
     #expect("\(ServiceError.batteryBelowFloor(percent: 12, floor: 15))".contains("12%"))
