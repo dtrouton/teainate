@@ -130,6 +130,13 @@ private struct Rig {
     func lid(duration: TimeInterval? = 7200, watched: pid_t? = nil, acOnly: Bool = false) -> HoldOptions {
         HoldOptions(duration: duration, watchedPID: watched, acOnly: acOnly, lidClosed: true, source: .cli)
     }
+
+    /// The persisted store state, read through a fresh store over the given table.
+    func state(table: [pid_t: ProcessSnapshot]) throws -> StoreState {
+        let clock = self.clock
+        return try HoldStore(fileURL: stateFile, snapshotter: StubSnapshotter(table: table),
+                             startTimes: StubStartTimes(times: [:]), now: { clock.time }).readState()
+    }
 }
 
 @Test func refusedWithoutGrantAndTouchesNothing() {
@@ -520,4 +527,82 @@ private struct Rig {
     try HoldStore(fileURL: rig.stateFile, snapshotter: StubSnapshotter(table: [:]))
         .mutateState { $0.stateResetAt = future }
     #expect(try rig.service.status().lidClosed.warnings.isEmpty)
+}
+
+// off→on: the watcher is spawned (and the flag set) while the plain caffeinate is
+// still alive; only then is the caffeinate signalled.
+@Test func modifyToLidClosedSpawnsTheWatcherBeforeReleasingTheCaffeinate() throws {
+    let table = Rig.table((500, "caffeinate"), (100, "teainate"))
+    let rig = Rig(table: table)
+    let plain = try rig.service.on(HoldOptions(duration: 7200, source: .menu))
+    #expect(plain.caffeinatePID == 500)
+    rig.watcher.onSpawn = { #expect(rig.spawner.terminated.isEmpty, "caffeinate signalled before the watcher existed") }
+
+    let lid = try rig.service.modify(id: plain.id, changing: .lidClosed, to: true)
+
+    #expect(lid.lidClosed)
+    #expect(lid.caffeinatePID == 100)
+    #expect(lid.replaces == plain.id)
+    #expect(rig.flag.setCount == 1)
+    #expect(rig.watcher.launches.count == 1)
+    #expect(rig.watcher.launches[0].1.contains("-i -t 7200"))
+    #expect(rig.spawner.terminated == [500])
+    let state = try rig.state(table: table)
+    #expect(state.holds.map(\.id) == [lid.id])
+    #expect(state.lidFlagOwned)
+}
+
+// on→off: no watcher runs hermetically, so nothing clears the flag on the watcher's
+// exit. The service's own orphan cleanup at the end of `off` sees the marker owned
+// with no lid-closed hold live and clears it.
+@Test func modifyFromLidClosedReleasesTheWatcherAndCleanupClearsTheFlag() throws {
+    let table = Rig.table((500, "caffeinate"), (100, "teainate"))
+    let rig = Rig(table: table)
+    let lid = try rig.service.on(rig.lid())
+    #expect(rig.flag.value)
+
+    let plain = try rig.service.modify(id: lid.id, changing: .lidClosed, to: false)
+
+    #expect(!plain.lidClosed)
+    #expect(plain.caffeinatePID == 500)
+    #expect(rig.spawner.terminated == [100])
+    #expect(rig.flag.value == false)
+    #expect(rig.flag.clearCount == 1)
+    let state = try rig.state(table: table)
+    #expect(state.holds.map(\.id) == [plain.id])
+    #expect(state.lidFlagOwned == false)
+}
+
+// on→on: two watchers overlap briefly; the marker and flag stay owned throughout.
+@Test func modifyOnALidHoldKeepsTheFlagOwnedThroughout() throws {
+    let table = Rig.table((100, "teainate"), (101, "teainate"))
+    let rig = Rig(table: table)
+    let first = try rig.service.on(rig.lid())
+
+    let second = try rig.service.modify(id: first.id, changing: .display, to: true)
+
+    #expect(second.lidClosed && second.display)
+    #expect(second.caffeinatePID == 101)
+    #expect(rig.watcher.launches.count == 2)
+    #expect(rig.watcher.launches[1].1.contains("-i -d -t 7200"))
+    #expect(rig.spawner.terminated == [100])
+    #expect(rig.flag.value)
+    #expect(rig.flag.clearAttempts == 0)
+    let state = try rig.state(table: table)
+    #expect(state.holds.map(\.id) == [second.id])
+    #expect(state.lidFlagOwned)
+}
+
+@Test func refusedLidModifyLeavesTheOriginalLive() throws {
+    let table = Rig.table((100, "teainate"))
+    let rig = Rig(battery: BatteryState(source: .battery, percent: 90), table: table)
+    let lid = try rig.service.on(rig.lid())
+
+    #expect(throws: ServiceError.notOnACPower) {
+        try rig.service.modify(id: lid.id, changing: .acOnly, to: true)
+    }
+    #expect(rig.spawner.terminated.isEmpty)
+    #expect(rig.watcher.launches.count == 1)
+    #expect(try rig.service.status().holds.map(\.id) == [lid.id])
+    #expect(rig.flag.value)
 }
