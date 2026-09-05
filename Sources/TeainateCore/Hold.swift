@@ -179,6 +179,32 @@ public struct Hold: Codable, Sendable, Equatable, Identifiable {
     }
 }
 
+/// The options that recreate `hold` with one modifier flipped, for
+/// `TeainateService.modify`. The end time stays where it was: a timer carries only
+/// its remaining seconds. nil when under a second remains — there is nothing left to
+/// recreate, and the caller reports the hold as gone.
+public func replacementOptions(
+    for hold: Hold, changing modifier: HoldModifier, to value: Bool, now: Date
+) -> HoldOptions? {
+    var duration: TimeInterval?
+    if let expiresAt = hold.expiresAt {
+        let remaining = expiresAt.timeIntervalSince(now)
+        guard remaining >= 1 else { return nil }
+        duration = remaining
+    }
+    var options = HoldOptions(
+        duration: duration, watchedPID: hold.watchedPID, acOnly: hold.acOnly,
+        display: hold.display, label: hold.label, lidClosed: hold.lidClosed,
+        source: hold.source, replaces: hold.replaces ?? hold.id
+    )
+    switch modifier {
+    case .display: options.display = value
+    case .acOnly: options.acOnly = value
+    case .lidClosed: options.lidClosed = value
+    }
+    return options
+}
+
 /// Why the most recent lid-closed hold ended on its own. The hold's record is removed
 /// when it ends, so this is the only place `status` can learn the reason.
 public struct EndedHold: Codable, Sendable, Equatable {
