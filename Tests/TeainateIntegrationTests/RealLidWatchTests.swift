@@ -25,6 +25,54 @@ private func tempState() -> URL {
         .appendingPathComponent("teainate-lidwatch-\(UUID().uuidString)/holds.json")
 }
 
+/// Forwards to the real spawner with `--no-flag` appended: a real watcher binary that
+/// never touches the kernel sleep flag. The service itself never passes this hook.
+private struct NoFlagWatcherSpawner: WatcherSpawning {
+    func spawnWatcher(executable: URL, arguments: [String]) throws -> pid_t {
+        try SystemWatcherSpawner().spawnWatcher(executable: executable, arguments: arguments + ["--no-flag"])
+    }
+}
+
+private final class FakeFlag: SleepFlagControlling, @unchecked Sendable {
+    var value = false
+    var clearCount = 0
+    func set() throws { value = true }
+    func clear() throws { clearCount += 1; value = false }
+    func isSet() throws -> Bool { value }
+}
+
+private struct AlwaysGranted: PrivilegeGranting {
+    func isGranted() -> Bool { true }
+}
+
+private struct OnACPower: BatteryReading {
+    func read() throws -> BatteryState? { BatteryState(source: .ac, percent: 90) }
+}
+
+/// Real service, real caffeinate, real watcher binary, real ps; faked flag, grant, and
+/// battery. The only shape of test that proves a lid transition composes correctly.
+private func realLidService() throws -> (service: TeainateService, flag: FakeFlag, state: URL) {
+    let state = tempState()
+    let snapshotter = PSProcessSnapshotter()
+    let flag = FakeFlag()
+    let service = TeainateService(
+        store: HoldStore(fileURL: state, snapshotter: snapshotter),
+        spawner: SystemCaffeinateSpawner(),
+        assertionReader: PMSetAssertionReader(),
+        snapshotter: snapshotter,
+        lidClosed: LidClosedDependencies(
+            flag: flag, grant: AlwaysGranted(), battery: OnACPower(),
+            settings: SettingsStore(fileURL: state.deletingLastPathComponent().appendingPathComponent("settings.json")),
+            watcherSpawner: NoFlagWatcherSpawner(),
+            watcherExecutable: try cliBinary(), stateFile: state)
+    )
+    return (service, flag, state)
+}
+
+private func storeState(_ state: URL) throws -> StoreState {
+    try HoldStore(fileURL: state, snapshotter: PSProcessSnapshotter()).readState()
+}
+
 // Real watcher, real ps, faked flag (--no-flag). This is the one shape of test that
 // catches a `ucomm` mismatch on the watcher's name — see CLAUDE.md.
 @Test func realWatcherSurvivesReconciliationAndOwnsItsChild() throws {
@@ -85,4 +133,63 @@ private func tempState() -> URL {
     sleeper.terminate()
     try waitUntilGone(pid)
     #expect(try PSProcessSnapshotter().snapshot()[pid] == nil)
+}
+
+// off→on through the real service: a real watcher replaces a real caffeinate.
+@Test func realModifyToLidClosedSpawnsAWatcherAndReleasesTheCaffeinate() throws {
+    let (service, flag, state) = try realLidService()
+    let plain = try service.on(HoldOptions(duration: 20, source: .menu))
+    defer { _ = try? service.off(id: nil) }
+
+    let lid = try service.modify(id: plain.id, changing: .lidClosed, to: true)
+
+    #expect(lid.lidClosed)
+    #expect(lid.replaces == plain.id)
+    #expect(flag.value)
+    try waitUntilGone(plain.caffeinatePID)
+    let table = try PSProcessSnapshotter().snapshot()
+    #expect(table[plain.caffeinatePID] == nil)
+    #expect(table[lid.caffeinatePID]?.command == watcherProcessName)
+    #expect(try service.status().holds.map(\.id) == [lid.id])
+    #expect(try storeState(state).lidFlagOwned)
+}
+
+// on→off: the watcher ran with --no-flag, so it cleared nothing on exit. The service's
+// own orphan cleanup, run at the end of `off`, is what clears the fake flag.
+@Test func realModifyFromLidClosedReleasesTheWatcherAndClearsTheFlag() throws {
+    let (service, flag, state) = try realLidService()
+    let lid = try service.on(HoldOptions(duration: 20, lidClosed: true, source: .menu))
+    defer { _ = try? service.off(id: nil) }
+    #expect(flag.value)
+
+    let plain = try service.modify(id: lid.id, changing: .lidClosed, to: false)
+
+    #expect(!plain.lidClosed)
+    try waitUntilGone(lid.caffeinatePID)
+    let table = try PSProcessSnapshotter().snapshot()
+    #expect(table[lid.caffeinatePID] == nil)
+    #expect(table[plain.caffeinatePID]?.command == "caffeinate")
+    #expect(flag.value == false)
+    #expect(flag.clearCount == 1)
+    #expect(try storeState(state).lidFlagOwned == false)
+    #expect(try service.status().holds.map(\.id) == [plain.id])
+}
+
+// on→on: two real watchers overlap, then only the new one remains; the flag is never cleared.
+@Test func realModifyOnALidHoldSwapsWatchersWithoutClearingTheFlag() throws {
+    let (service, flag, state) = try realLidService()
+    let first = try service.on(HoldOptions(duration: 20, lidClosed: true, source: .menu))
+    defer { _ = try? service.off(id: nil) }
+
+    let second = try service.modify(id: first.id, changing: .display, to: true)
+
+    #expect(second.lidClosed && second.display)
+    try waitUntilGone(first.caffeinatePID)
+    let table = try PSProcessSnapshotter().snapshot()
+    #expect(table[first.caffeinatePID] == nil)
+    #expect(table[second.caffeinatePID]?.command == watcherProcessName)
+    #expect(flag.value)
+    #expect(flag.clearCount == 0)
+    #expect(try storeState(state).lidFlagOwned)
+    #expect(try service.status().holds.map(\.id) == [second.id])
 }

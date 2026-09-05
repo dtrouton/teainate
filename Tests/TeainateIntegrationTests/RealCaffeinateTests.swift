@@ -114,3 +114,27 @@ private func realService() -> (TeainateService, URL) {
     #expect(hold.processStartedAt == ProcPIDInfoStartTimeReader().startTime(of: hold.caffeinatePID))
     #expect(try service.status().holds.map(\.id) == [hold.id])
 }
+
+// Real spawner and real ps together, like reconcile in production: the replacement is
+// recognised and the original is gone. Fakes hardcode `command: "caffeinate"` and
+// could not see a flags or naming regression here.
+@Test func realModifyReplacesTheProcessAndSurvivesReconciliation() throws {
+    let (service, _) = realService()
+    let original = try service.on(HoldOptions(duration: 20, source: .menu))
+    defer { _ = try? service.off(id: nil) }
+
+    let replacement = try service.modify(id: original.id, changing: .display, to: true)
+
+    #expect(replacement.flags.starts(with: ["-i", "-d", "-t"]))
+    #expect(replacement.replaces == original.id)
+
+    var attempts = 0
+    while attempts < 50, try PSProcessSnapshotter().snapshot()[original.caffeinatePID] != nil {
+        usleep(100_000); attempts += 1
+    }
+    let table = try PSProcessSnapshotter().snapshot()
+    #expect(table[original.caffeinatePID] == nil)
+    #expect(table[replacement.caffeinatePID]?.command == "caffeinate")
+    #expect(try service.status().holds.map(\.id) == [replacement.id])
+    #expect(try PMSetAssertionReader().assertions().contains { $0.pid == replacement.caffeinatePID })
+}
