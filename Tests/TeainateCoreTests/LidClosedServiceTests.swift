@@ -511,3 +511,13 @@ private struct Rig {
         try service.on(HoldOptions(duration: 60, lidClosed: true, source: .cli))
     }
 }
+
+// A backwards clock step must not resurrect the corrupt-state warning: a reset stamp
+// in the future is outside the window, not inside it.
+@Test func resetStampInTheFutureDoesNotWarn() throws {
+    let rig = Rig(table: [:])
+    let future = rig.clock.time.addingTimeInterval(100)
+    try HoldStore(fileURL: rig.stateFile, snapshotter: StubSnapshotter(table: [:]))
+        .mutateState { $0.stateResetAt = future }
+    #expect(try rig.service.status().lidClosed.warnings.isEmpty)
+}

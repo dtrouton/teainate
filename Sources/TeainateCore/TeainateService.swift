@@ -518,7 +518,8 @@ public struct TeainateService: Sendable {
         } else if flagSet == true && !state.lidFlagOwned {
             warnings.append("Sleep is disabled outside teainate (pmset disablesleep); this Mac will not sleep with the lid closed until that is cleared.")
         }
-        if let reset = state.stateResetAt, now().timeIntervalSince(reset) < stateResetWarningPeriod {
+        if let reset = state.stateResetAt,
+           (0..<stateResetWarningPeriod).contains(now().timeIntervalSince(reset)) {
             warnings.append("The state file was corrupt and has been reset; if this Mac will not sleep, run: sudo pmset -a disablesleep 0")
         }
         return LidClosedStatus(

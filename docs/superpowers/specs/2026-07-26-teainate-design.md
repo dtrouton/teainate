@@ -209,8 +209,8 @@ Human-readable output is the default; `--json` is for the skill.
 
 ## Claude Code skill
 
-Ships in-repo at `skills/teainate/SKILL.md`, installed to
-`~/.claude/skills/teainate/`.
+Ships as a Swift string constant in `SkillInstaller.swift` (bundle-resource lookup
+differs between the CLI and the `.app`), installed to `~/.claude/skills/teainate/`.
 
 The skill description triggers on phrasings like "keep the mac awake", "don't let
 it sleep", and "why won't my mac sleep", and instructs Claude to take a

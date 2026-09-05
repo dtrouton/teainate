@@ -53,7 +53,7 @@ extension SleepFlagError: CustomStringConvertible {
     public var description: String {
         switch self {
         case .commandFailed(let status, let message):
-            return "Sudo pmset exited with status \(status): \(message)"
+            return "The sudo pmset command exited with status \(status): \(message)"
         }
     }
 }

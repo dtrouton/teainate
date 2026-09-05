@@ -33,3 +33,7 @@ private func isSentence(_ error: any Error) -> Bool {
     for error in all { #expect(isSentence(error), "\(error)") }
     #expect("\(HoldStoreError.lockTimeout)".contains("try again"))
 }
+
+@Test func sudoFailureNamesTheCommandNaturally() {
+    #expect("\(SleepFlagError.commandFailed(status: 1, message: "denied"))".hasPrefix("The sudo pmset command exited"))
+}

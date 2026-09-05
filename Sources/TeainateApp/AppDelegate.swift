@@ -60,9 +60,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         case .toggleDisplay:
             preferences.display.toggle()
         case .release(let id):
-            _ = try? service.off(id: id)
+            do { _ = try service.off(id: id) }
+            catch { present(error: "Could not release the hold.", detail: "\(error)") }
         case .releaseAll:
-            _ = try? service.off(id: nil)
+            do { _ = try service.off(id: nil) }
+            catch { present(error: "Could not release the holds.", detail: "\(error)") }
         case .reclaimUntracked:
             reclaimUntracked()
         case .installSkill:
@@ -147,7 +149,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         alert.buttons[1].keyEquivalent = ""
         guard alert.runModal() == .alertSecondButtonReturn else { return }
 
-        _ = try? service.reclaimUntracked()
+        do { _ = try service.reclaimUntracked() }
+        catch { present(error: "Could not release the untracked processes.", detail: "\(error)") }
     }
 
     private func installSkill() {

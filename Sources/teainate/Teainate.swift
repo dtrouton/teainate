@@ -80,14 +80,8 @@ struct On: ParsableCommand {
         if let text = `for` {
             do {
                 _ = try parseDuration(text)
-            } catch DurationParseError.tooLong {
-                throw ValidationError(
-                    "Duration '\(text)' is longer than the \(maxDurationDays) day maximum."
-                )
-            } catch {
-                throw ValidationError(
-                    "Invalid duration '\(text)'. Use 45m, 2h, or a bare number of minutes."
-                )
+            } catch let error as DurationParseError {
+                throw ValidationError("\(error)")
             }
         }
 
@@ -105,11 +99,8 @@ struct On: ParsableCommand {
 
         var watched: pid_t?
         if session {
-            do {
-                watched = try service.resolveSessionPID()
-            } catch ServiceError.noClaudeAncestor {
-                throw FriendlyError(description: "\(ServiceError.noClaudeAncestor)")
-            }
+            // ServiceError.noClaudeAncestor already prints as the sentence the user needs.
+            watched = try service.resolveSessionPID()
         } else if let untilPid {
             watched = untilPid
         }
@@ -223,8 +214,8 @@ struct Off: ParsableCommand {
     var untracked = false
 
     func validate() throws {
-        if id == nil && !all && !untracked {
-            throw ValidationError("Specify --id <id>, --all, or --untracked.")
+        if let problem = offSelectionProblem(id: id, all: all, untracked: untracked) {
+            throw ValidationError(problem)
         }
     }
 
