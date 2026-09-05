@@ -29,6 +29,54 @@ private func tempFile() -> URL {
         .appendingPathComponent("holds.json")
 }
 
+private let t1 = ProcessStartTime(seconds: 1_000, microseconds: 1)
+private let t2 = ProcessStartTime(seconds: 1_000, microseconds: 2)
+
+private func stamped(_ id: String, pid: pid_t, startedAt: ProcessStartTime?) -> Hold {
+    var h = hold(id, pid: pid)
+    h.processStartedAt = startedAt
+    return h
+}
+
+@Test func reconcileKeepsHoldWhoseStartTimeMatches() {
+    let kept = reconcile([stamped("a", pid: 100, startedAt: t1)], against: table((100, "caffeinate")),
+                         startTime: { _ in t1 })
+    #expect(kept.map(\.id) == ["a"])
+}
+
+@Test func reconcileDropsRecycledPIDWithDifferentStartTime() {
+    // Same pid, same name, one microsecond later: a different process.
+    let kept = reconcile([stamped("a", pid: 100, startedAt: t1)], against: table((100, "caffeinate")),
+                         startTime: { _ in t2 })
+    #expect(kept.isEmpty)
+}
+
+@Test func reconcileDropsStampedHoldWhoseStartTimeCannotBeRead() {
+    let kept = reconcile([stamped("a", pid: 100, startedAt: t1)], against: table((100, "caffeinate")),
+                         startTime: { _ in nil })
+    #expect(kept.isEmpty)
+}
+
+@Test func legacyRecordWithoutStartTimeMatchesByNameOnly() {
+    let kept = reconcile([stamped("a", pid: 100, startedAt: nil)], against: table((100, "caffeinate")),
+                         startTime: { _ in t2 })
+    #expect(kept.map(\.id) == ["a"])
+}
+
+@Test func storeUsesItsStartTimeReader() throws {
+    struct FixedReader: ProcessStartTimeReading {
+        let value: ProcessStartTime?
+        func startTime(of pid: pid_t) -> ProcessStartTime? { value }
+    }
+    let url = tempFile()
+    let writer = HoldStore(fileURL: url, snapshotter: FakeSnapshotter(table: table((100, "caffeinate"))),
+                           startTimes: FixedReader(value: t1))
+    try writer.mutate { $0.append(stamped("a", pid: 100, startedAt: t1)) }
+    let recycled = HoldStore(fileURL: url, snapshotter: FakeSnapshotter(table: table((100, "caffeinate"))),
+                             startTimes: FixedReader(value: t2))
+    #expect(try recycled.read().isEmpty)
+}
+
 @Test func reconcileKeepsLiveCaffeinateHolds() {
     let kept = reconcile([hold("a", pid: 100)], against: table((100, "caffeinate")))
     #expect(kept.map(\.id) == ["a"])
@@ -150,6 +198,7 @@ private func lidHold(_ id: String, pid: pid_t) -> Hold {
     #expect(state.holds.map(\.id) == ["a"])
     #expect(state.holds.first?.lidClosed == false)
     #expect(state.holds.first?.batteryFloor == nil)
+    #expect(state.holds.first?.processStartedAt == nil)
     #expect(state.lidFlagOwned == false)
     #expect(state.lidFlagPendingSince == nil)
     #expect(state.lastEnded == nil)

@@ -13,14 +13,21 @@ public func expectedProcessName(for hold: Hold) -> String {
     hold.lidClosed ? watcherProcessName : caffeinateProcessName
 }
 
-/// Drops holds whose PID is gone, or now belongs to a process of the wrong kind.
+/// Drops holds whose PID is gone, now belongs to a process of the wrong kind, or —
+/// when the record carries a start time — to a process started at a different instant.
+/// A record without a start time (written before 0.2.1) matches by name only.
 /// This is what lets a plain file be a safe source of truth: a stale record can exist
 /// after a crash, but never survives the next read.
-///
-/// This does NOT protect against a PID being recycled by another process of the same
-/// name — see docs/followups.md ("Close the PID-recycling gap properly").
-public func reconcile(_ holds: [Hold], against table: [pid_t: ProcessSnapshot]) -> [Hold] {
-    holds.filter { table[$0.caffeinatePID]?.command == expectedProcessName(for: $0) }
+public func reconcile(
+    _ holds: [Hold],
+    against table: [pid_t: ProcessSnapshot],
+    startTime: (pid_t) -> ProcessStartTime? = { _ in nil }
+) -> [Hold] {
+    holds.filter { hold in
+        guard table[hold.caffeinatePID]?.command == expectedProcessName(for: hold) else { return false }
+        guard let recorded = hold.processStartedAt else { return true }
+        return startTime(hold.caffeinatePID) == recorded
+    }
 }
 
 /// Every pid teainate is responsible for: the hold processes themselves plus the
@@ -39,10 +46,15 @@ public func ownedPIDs(of holds: [Hold], in table: [pid_t: ProcessSnapshot]) -> S
 public struct HoldStore: Sendable {
     private let fileURL: URL
     private let snapshotter: any ProcessSnapshotting
+    private let startTimes: any ProcessStartTimeReading
 
-    public init(fileURL: URL, snapshotter: any ProcessSnapshotting) {
+    public init(
+        fileURL: URL, snapshotter: any ProcessSnapshotting,
+        startTimes: any ProcessStartTimeReading = ProcPIDInfoStartTimeReader()
+    ) {
         self.fileURL = fileURL
         self.snapshotter = snapshotter
+        self.startTimes = startTimes
     }
 
     public func read() throws -> [Hold] {
@@ -66,7 +78,9 @@ public struct HoldStore: Sendable {
         defer { flock(descriptor, LOCK_UN); close(descriptor) }
 
         var state = loadRaw()
-        state.holds = reconcile(state.holds, against: try snapshotter.snapshot())
+        state.holds = reconcile(
+            state.holds, against: try snapshotter.snapshot(), startTime: startTimes.startTime(of:)
+        )
         let result = try body(&state)
         try persist(state)
         return result

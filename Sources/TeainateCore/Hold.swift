@@ -82,12 +82,17 @@ public struct Hold: Codable, Sendable, Equatable, Identifiable {
     public var lidClosed: Bool
     /// The battery floor this hold was taken with. Never changes after the fact.
     public var batteryFloor: Int?
+    /// The kernel's start time for `caffeinatePID` at the moment this hold was recorded.
+    /// Compared alongside the PID during reconciliation to close the PID-recycling gap;
+    /// nil for records written before this field existed, which then match by name only.
+    public var processStartedAt: ProcessStartTime?
 
     public init(
         id: String, kind: HoldKind, label: String?, source: HoldSource,
         caffeinatePID: pid_t, flags: [String], startedAt: Date, expiresAt: Date?,
         watchedPID: pid_t?, display: Bool, acOnly: Bool,
-        lidClosed: Bool = false, batteryFloor: Int? = nil
+        lidClosed: Bool = false, batteryFloor: Int? = nil,
+        processStartedAt: ProcessStartTime? = nil
     ) {
         self.id = id
         self.kind = kind
@@ -102,6 +107,7 @@ public struct Hold: Codable, Sendable, Equatable, Identifiable {
         self.acOnly = acOnly
         self.lidClosed = lidClosed
         self.batteryFloor = batteryFloor
+        self.processStartedAt = processStartedAt
     }
 
     enum CodingKeys: String, CodingKey {
@@ -113,6 +119,7 @@ public struct Hold: Codable, Sendable, Equatable, Identifiable {
         case acOnly = "ac_only"
         case lidClosed = "lid_closed"
         case batteryFloor = "battery_floor"
+        case processStartedAt = "process_started_at"
     }
 
     /// Explicit so records written before lid-closed holds existed still decode.
@@ -131,6 +138,7 @@ public struct Hold: Codable, Sendable, Equatable, Identifiable {
         acOnly = try c.decode(Bool.self, forKey: .acOnly)
         lidClosed = try c.decodeIfPresent(Bool.self, forKey: .lidClosed) ?? false
         batteryFloor = try c.decodeIfPresent(Int.self, forKey: .batteryFloor)
+        processStartedAt = try c.decodeIfPresent(ProcessStartTime.self, forKey: .processStartedAt)
     }
 
     public func remainingSeconds(now: Date) -> Int? {
