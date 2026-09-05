@@ -174,3 +174,13 @@ private func fakeCLI(in paths: TeainatePaths) throws -> URL {
     #expect(text.contains("Enable lid-closed holds"))
     #expect(!text.contains("battery floor"))     // the skill never sets or mentions it
 }
+
+// An agent copying a bare `teainate` invocation from the skill may hit "command not
+// found" — in the one example whose whole point is that a non-zero exit is trustworthy.
+@Test func skillNeverShowsABareTeainateInvocation() {
+    let text = renderSkillTemplate(cliPath: "/x/teainate")
+    for line in text.split(separator: "\n") where line.contains("teainate on") {
+        #expect(!line.contains("`teainate on"), "bare invocation: \(line)")
+        #expect(!line.hasPrefix("teainate on"), "bare invocation: \(line)")
+    }
+}

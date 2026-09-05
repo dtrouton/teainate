@@ -98,9 +98,23 @@ private func defaultLabel(for hold: HoldStatus) -> String {
         return "indefinitely"
     case .timer:
         guard let remaining = hold.remainingSeconds else { return "timed" }
-        if remaining < 60 { return "less than a minute left" }
-        return "\(Int((Double(remaining) / 60).rounded())) min left"
+        return "\(remainingLabel(seconds: remaining)) left"
     case .process:
         return "until session exits"
     }
+}
+
+/// Minutes under an hour, hours and minutes under two days, days and hours beyond.
+/// Zero trailing units are dropped ("2 h", not "2 h 0 min"). Rounds the smallest
+/// unit shown, so a hold never reads as spent while seconds remain.
+func remainingLabel(seconds: Int) -> String {
+    if seconds < 60 { return "less than a minute" }
+    let minutes = Int((Double(seconds) / 60).rounded())
+    if minutes < 60 { return "\(minutes) min" }
+    let hours = minutes / 60, spareMinutes = minutes % 60
+    if hours < 48 {
+        return spareMinutes == 0 ? "\(hours) h" : "\(hours) h \(spareMinutes) min"
+    }
+    let days = hours / 24, spareHours = hours % 24
+    return spareHours == 0 ? "\(days) days" : "\(days) days \(spareHours) h"
 }

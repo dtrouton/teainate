@@ -444,7 +444,9 @@ private struct Rig {
 
     let status = try rig.service.status()
     #expect(status.untrackedCaffeinate.map(\.pid) == [300])
-    #expect(status.foreignAssertions.map(\.pid) == [300])
+    // 200 is our watcher's child; 300 is already described (with its flags) as
+    // untracked, so neither is repeated as a foreign assertion.
+    #expect(status.foreignAssertions.isEmpty)
     #expect(status.holds.first?.lidClosed == true)
     #expect(status.holds.first?.batteryFloor == 15)
 }

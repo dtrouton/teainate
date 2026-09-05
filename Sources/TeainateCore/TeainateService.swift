@@ -492,7 +492,10 @@ public struct TeainateService: Sendable {
                     lidClosed: hold.lidClosed, batteryFloor: hold.batteryFloor
                 )
             },
-            foreignAssertions: foreign.filter { !ours.contains($0.pid) },
+            // Our own processes are not foreign, and an untracked caffeinate is already
+            // listed with its flags — repeating it here describes one process twice.
+            foreignAssertions: dedupeForeignAssertions(
+                foreign, excludingPIDs: ours.union(untracked.map(\.pid))),
             untrackedCaffeinate: untracked,
             lidClosed: lidClosedStatus(state),
             pmsetAvailable: pmsetAvailable

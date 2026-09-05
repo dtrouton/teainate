@@ -163,3 +163,26 @@ private func holdStatus(
     #expect(json.contains("\"battery_floor\""))
     #expect(json.contains("\"flag_set_by\" : \"other\""))
 }
+
+// Past an hour, minutes alone stop being readable ("43200 min left"). Values are
+// deliberately not multiples of 60 or 3600 so truncation cannot hide.
+@Test func rendersHoursAndMinutesPastAnHour() {
+    let text = renderStatus(status(holds: [holdStatus(kind: .timer, remaining: 5_000)]))
+    #expect(text.contains("1 h 23 min left"))
+}
+
+@Test func omitsZeroMinutesOnAWholeHour() {
+    let text = renderStatus(status(holds: [holdStatus(kind: .timer, remaining: 7_200)]))
+    #expect(text.contains("2 h left"))
+    #expect(!text.contains("0 min"))
+}
+
+@Test func rendersDaysAndHoursPastTwoDays() {
+    let text = renderStatus(status(holds: [holdStatus(kind: .timer, remaining: 190_000)]))
+    #expect(text.contains("2 days 4 h left"))
+}
+
+@Test func keepsMinutesJustUnderAnHour() {
+    let text = renderStatus(status(holds: [holdStatus(kind: .timer, remaining: 3_500)]))
+    #expect(text.contains("58 min left"))
+}

@@ -124,7 +124,7 @@ non-zero exit status and says so on stderr. Fall back to a timer:
 {{CLI_PATH}} on --for 45m --label "running test suite"
 ```
 
-Because it exits non-zero on failure, it is safe to chain: `teainate on --session &&
+Because it exits non-zero on failure, it is safe to chain: `{{CLI_PATH}} on --session &&
 long_running_job` will not run the job if the hold could not be taken.
 
 ## Checking state

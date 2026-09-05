@@ -382,3 +382,35 @@ private func liveTable(_ pids: pid_t...) -> [pid_t: ProcessSnapshot] {
     #expect(json.contains("\"remaining_seconds\""))
     #expect(json.contains("\"expires_at\""))
 }
+
+// pmset lists one line per assertion, so a process holding seven identical assertions
+// produced seven identical rows in status. One row per (process, type) is enough.
+@Test func statusCollapsesIdenticalForeignAssertions() throws {
+    let repeated = ForeignAssertion(pid: 640, process: "cloudd", type: "SystemIsActive")
+    let other = ForeignAssertion(pid: 640, process: "cloudd", type: "BackgroundTask")
+    let service = makeService(assertions: StubAssertions(value: [repeated, repeated, other, repeated]))
+    #expect(try service.status().foreignAssertions == [repeated, other])
+}
+
+// An untracked caffeinate already appears with its flags under untracked_caffeinate;
+// repeating it under foreign_assertions describes one process twice.
+@Test func statusDropsForeignAssertionsAlreadyListedAsUntracked() throws {
+    var table: [pid_t: ProcessSnapshot] = [:]
+    table[555] = ProcessSnapshot(pid: 555, parentPID: 1, command: "caffeinate", arguments: "caffeinate -i")
+    let service = makeService(
+        snapshotter: StubSnapshotter(table: table),
+        assertions: StubAssertions(value: [
+            ForeignAssertion(pid: 555, process: "caffeinate", type: "PreventUserIdleSystemSleep"),
+            ForeignAssertion(pid: 640, process: "Claude", type: "NoIdleSleepAssertion"),
+        ]))
+    let status = try service.status()
+    #expect(status.untrackedCaffeinate.map(\.pid) == [555])
+    #expect(status.foreignAssertions.map(\.pid) == [640])
+}
+
+@Test func offSelectionRejectsIdTogetherWithAll() {
+    #expect(offSelectionProblem(id: "h_1", all: true, untracked: false) == "Choose --id or --all, not both.")
+    #expect(offSelectionProblem(id: nil, all: false, untracked: false) == "Specify --id <id>, --all, or --untracked.")
+    #expect(offSelectionProblem(id: "h_1", all: false, untracked: false) == nil)
+    #expect(offSelectionProblem(id: nil, all: true, untracked: true) == nil)
+}

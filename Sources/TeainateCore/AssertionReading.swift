@@ -67,3 +67,18 @@ public struct PMSetAssertionReader: AssertionReading {
         return parseAssertions(String(decoding: data, as: UTF8.self))
     }
 }
+
+/// One row per (process, assertion type), in first-seen order, minus any process the
+/// caller already describes elsewhere. `pmset` prints one line per assertion, so a
+/// process holding seven identical assertions would otherwise appear seven times.
+public func dedupeForeignAssertions(
+    _ assertions: [ForeignAssertion], excludingPIDs excluded: Set<pid_t>
+) -> [ForeignAssertion] {
+    var seen: Set<String> = []
+    var result: [ForeignAssertion] = []
+    for assertion in assertions where !excluded.contains(assertion.pid) {
+        let key = "\(assertion.pid)\u{0}\(assertion.process)\u{0}\(assertion.type)"
+        if seen.insert(key).inserted { result.append(assertion) }
+    }
+    return result
+}
