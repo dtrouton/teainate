@@ -32,5 +32,3 @@ hold whose caffeinate has already exited.
   (CLI and app always supply a watcher path) but is the wrong home for a warning
   about `holds.json`. A top-level `warnings` list on `Status` would be honest; the
   spec placed it where it is.
-- **A process-kind hold cannot say which process it is watching.** `watched_pid`
-  is recorded but never surfaced, so "until session exits" is all the user gets.

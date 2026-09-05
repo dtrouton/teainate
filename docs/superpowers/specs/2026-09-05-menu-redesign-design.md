@@ -296,8 +296,8 @@ spawned pid:
   reconciliation.
 - on→off: the record becomes a plain caffeinate hold and the old watcher exits.
   With `--no-flag` the watcher never touches any flag, so the marker is left owned
-  with no lid-closed hold live; the next `status()` must then run orphan cleanup
-  through the fake flag (`clear()` called, marker dropped).
+  with no lid-closed hold live; the service's own orphan cleanup, run at the end of
+  `off`, then clears the fake flag (`clear()` called once, marker dropped).
 - on→on: two watchers overlap, then only the new one remains, the marker stays
   owned, and `status()` does **not** call the fake flag's `clear()`.
 

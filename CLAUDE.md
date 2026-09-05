@@ -94,6 +94,11 @@ system. The CLI and the AppKit app are thin clients.
   describe a process that does not exist, and a spawned process must never go
   unrecorded — an untracked `caffeinate` holds the Mac awake with no way to release
   it through the UI.
+- **`modify` is `on` then `off`, never a swap in place.** The replacement is spawned
+  and recorded before the original is signalled, so the Mac is never unheld. A
+  replacement never reuses an id: a lid-closed watcher removes its record *by id* on
+  exit, and would take a same-id successor with it. Lineage lives in `replaces`, and
+  `off(id:)` matches it, so the id `on` printed keeps working after menu edits.
 
 ## Conventions
 
@@ -104,6 +109,9 @@ system. The CLI and the AppKit app are thin clients.
 - Failures the user asked for must fail loudly: non-zero exit, stderr. `CleanExit`
   prints to stdout and exits 0, which made a failed `--session` look like success
   to anything chaining on it. Use `FriendlyError` instead.
+- Menu checkboxes mean what checkboxes mean: a hold row's boxes are that hold's live
+  flags, and the "New holds" boxes are persisted defaults. Never add a checkbox whose
+  state only applies to something that has not happened yet.
 
 ## Known limitations
 
