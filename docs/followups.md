@@ -10,6 +10,19 @@ one more thing to poll), a per-hold floor override for humans at the CLI, and a
 `status` line for "grant present but sudo refuses" (only detectable by a `sudo -n`
 probe, which `status` deliberately never runs — today it surfaces at `on` time).
 
+**Lid-closed holds: what the user is told about the flag.** Two findings from the
+final review that change messaging, not safety. (1) When `pmset -g` cannot be read,
+orphan cleanup assumes the flag is set (`?? true`, so it tries to clear) while
+`status` assumes it is clear (`?? false`, so `flag_set` reads false). Report
+"unknown" instead of guessing in either direction. (2) `LidClosedStatus.warning` is a
+single field, so a stuck-flag or set-elsewhere warning overwrites the settings-file
+warning; a corrupt `settings.json` plus a stuck flag hides the silent fallback to
+floor 15. Smaller, same area: a corrupt `holds.json` is backed up and reset, which
+also resets `lid_flag_owned`, so a flag teainate set then reads as someone else's;
+the ended-hold alert in the app is a modal `NSAlert` rather than a notification;
+timer expiry is noticed up to 30 s late because the watcher polls, so `status` can
+briefly show a lid-closed hold whose caffeinate has already exited.
+
 **Distinguish "pmset failed" from "nothing else is holding the Mac awake."**
 `status()` swallows a `pmset` failure with `(try? ...) ?? []`, and
 `PMSetAssertionReader` never checks `terminationStatus`. Three different

@@ -351,6 +351,14 @@ CLAUDE.md is explicit: a green suite is not evidence that anything involving
 **Manual checklist**, required before this ships. Nothing here can be automated:
 setting the real flag needs the grant and closing the lid needs a human.
 
+*Run on 2026-09-05 on the target MacBook (M4, macOS 26.6.2), on battery:* grant
+detected through the root-only file; a 10-minute lid-closed hold kept the Mac awake
+through 5 minutes with the lid shut (11 timestamps at 30 s intervals, no gap, no
+sleep in `pmset -g log`); an `--ac-only` hold ended within one poll of unplugging
+with the reason recorded; a SIGKILLed watcher left no orphaned caffeinate and the
+next read cleared the flag; timer expiry cleared the flag and marker. The floor
+cutoff was not exercised (battery at 99%, floor tops out at 50%).
+
 1. Grant from the menu. Confirm `pmset -g | grep SleepDisabled` is 0 or absent.
 2. On battery above the floor, take a 10-minute lid-closed hold. Confirm
    `SleepDisabled 1`.
