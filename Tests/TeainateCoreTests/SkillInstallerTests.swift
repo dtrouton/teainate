@@ -163,6 +163,11 @@ private func fakeCLI(in paths: TeainatePaths) throws -> URL {
     #expect(rendered.contains("name: teainate"))
 }
 
+@Test func skillExplainsPmsetAvailability() {
+    let text = renderSkillTemplate(cliPath: "/x/teainate")
+    #expect(text.contains("pmset_available"))
+}
+
 @Test func skillExplainsLidClosedHolds() {
     let text = renderSkillTemplate(cliPath: "/x/teainate")
     #expect(text.contains("--lid-closed"))

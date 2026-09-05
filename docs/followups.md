@@ -10,49 +10,11 @@ one more thing to poll), a per-hold floor override for humans at the CLI, and a
 `status` line for "grant present but sudo refuses" (only detectable by a `sudo -n`
 probe, which `status` deliberately never runs — today it surfaces at `on` time).
 
-**Lid-closed holds: what the user is told about the flag.** Two findings from the
-final review that change messaging, not safety. (1) When `pmset -g` cannot be read,
-orphan cleanup assumes the flag is set (`?? true`, so it tries to clear) while
-`status` assumes it is clear (`?? false`, so `flag_set` reads false). Report
-"unknown" instead of guessing in either direction. (2) `LidClosedStatus.warning` is a
-single field, so a stuck-flag or set-elsewhere warning overwrites the settings-file
-warning; a corrupt `settings.json` plus a stuck flag hides the silent fallback to
-floor 15. Smaller, same area: a corrupt `holds.json` is backed up and reset, which
-also resets `lid_flag_owned`, so a flag teainate set then reads as someone else's;
-the ended-hold alert in the app is a modal `NSAlert` rather than a notification;
-timer expiry is noticed up to 30 s late because the watcher polls, so `status` can
-briefly show a lid-closed hold whose caffeinate has already exited.
-
-**Distinguish "pmset failed" from "nothing else is holding the Mac awake."**
-`status()` swallows a `pmset` failure with `(try? ...) ?? []`, and
-`PMSetAssertionReader` never checks `terminationStatus`. Three different
-conditions — no other assertions, `pmset` failing, output we could not parse —
-all render as an empty `foreign_assertions`. That is the field a user consults to
-answer "why won't my Mac sleep?", so an empty list needs to mean empty. Make the
-reader distinguish failure, and let the CLI and menu say "unavailable" rather than
-implying nothing is there.
-
-**Stop leaking raw Swift enum names to the user.** `teainate status` with the
-state file locked prints `Error: lockTimeout`. `HoldStoreError` and `ServiceError`
-have no human-readable descriptions, so any error not specially caught surfaces as
-its Swift case name. Conform them to `CustomStringConvertible`.
-
-**Make the duration overflow trap impossible, not merely unreachable.**
-`parseDuration` now caps at 30 days, so no CLI input can reach the
-`String(Int(duration))` conversion in `caffeinateFlags` with an unbounded value.
-But that conversion is still unguarded and `HoldOptions.duration` is a bare
-`TimeInterval?`, so a future caller constructing `HoldOptions` directly — a new
-menu duration picker, a test, programmatic use — could trap exactly as the CLI
-used to. Either bound it at the `caffeinateFlags` layer too, or give durations a
-type that cannot hold an out-of-range value.
-
-**Close the PID-recycling gap properly.** `reconcile` drops holds whose PID now
-belongs to a non-`caffeinate` process, but a PID recycled by *another*
-`caffeinate` is adopted as ours. On a machine running Claude Code that is not
-far-fetched: session `caffeinate` processes respawn constantly, making them a
-likely recycling target. The fix is recording each process's start time
-(`ps -o lstart=`) alongside its PID and requiring both to match. The docs and
-README now describe the limitation accurately; this would remove it.
+**Lid-closed holds: what the user is told about the flag.** Two findings still
+open, both about the app rather than the CLI or `status`: the ended-hold alert is
+a modal `NSAlert` rather than a notification, and timer expiry is noticed up to
+30 s late because the watcher polls, so `status` can briefly show a lid-closed
+hold whose caffeinate has already exited.
 
 ## Smaller
 
@@ -74,13 +36,16 @@ README now describe the limitation accurately; this would remove it.
   lines describing two processes makes the reader work.
 - **`--for X --session` is rejected, but `off --id X --all` is accepted** with
   `--all` silently ignored. Validate it the same way.
-- **State-file corruption recovers silently.** The spec says warn; the code moves
-  the file to `.bak` and continues without telling anyone.
 - **Two version constants** — `TeainateVersion.current` and
   `CFBundleShortVersionString` — with nothing tying them together. The skill's
   staleness check keys off the Swift one, so bumping only the plist leaves every
   installed skill claiming to be current.
-- **The `"caffeinate"` literal is compared in three places.** One constant.
+- **`On.validate()` hand-rolls duration error text via `ValidationError`**,
+  duplicating the messages `Errors.swift` already builds. One source of truth
+  would keep them from drifting apart.
+- **`ProcPIDInfoStartTimeReader` converts `pbi_start_tvusec` with `Int32(_:)`**,
+  which traps on an out-of-range value; `Int32(clamping:)` would be safer for a
+  field read from the kernel rather than validated input.
 - **A process-kind hold cannot say which process it is watching.** `watched_pid`
   is recorded but never surfaced, so "until session exits" is all the user gets.
 - **Long holds render in minutes.** A 30-day hold reads `43200 min left`.

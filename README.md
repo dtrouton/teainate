@@ -108,10 +108,11 @@ and silently breaks name matching.
 
 On every read, teainate drops any recorded hold whose PID is gone or now belongs
 to a process that is not `caffeinate` — this is what makes the state file safe to
-trust after a crash. It does **not** protect against a PID being recycled by
-*another* `caffeinate` process (for example, a different Claude Code session's):
-that gets adopted as one of teainate's own. Closing that gap would mean also
-recording and matching each process's start time, which is not implemented.
+trust after a crash. Since 0.2.1 each record also carries the process's exact
+start time (`process_started_at`, read from the kernel with `proc_pidinfo`), and
+reconciliation requires both the PID and the start time to match, so a recycled
+PID is never adopted. Records written by earlier versions match by name only
+until they end.
 
 ## Development
 

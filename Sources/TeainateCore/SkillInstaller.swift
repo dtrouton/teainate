@@ -142,6 +142,11 @@ answer is often another app, not teainate. `untracked_caffeinate` carries each
 process's actual flags, which `pmset` cannot report, so it is the better place to
 look when the culprit is a stray `caffeinate`.
 
+If `pmset_available` is false, `foreign_assertions` is empty because `pmset` could
+not be read, not because nothing else is holding the Mac awake — say so rather than
+concluding the Mac is free to sleep. `lid_closed.flag_set` is `null` when the kernel
+flag could not be read; `lid_closed.warnings` lists anything the user should know.
+
 ## Options
 
 - `--for 45m` / `--for 2h` / `--for 90` (bare number means minutes)
