@@ -56,3 +56,41 @@ private func tempSettings() -> SettingsStore {
     #expect(paths.settingsFile.path == "/Users/x/Library/Application Support/teainate/settings.json")
     #expect(paths.lidWatchLog.path == "/Users/x/Library/Application Support/teainate/lid-watch.log")
 }
+
+@Test func newHoldDefaultsRoundTrip() throws {
+    let store = tempSettings()
+    try store.write(Settings(batteryFloor: 20, newHoldDefaults: NewHoldDefaults(display: true, acOnly: false, lidClosed: true)))
+    let (settings, warning) = store.read()
+    #expect(settings.batteryFloor == 20)
+    #expect(settings.newHoldDefaults == NewHoldDefaults(display: true, acOnly: false, lidClosed: true))
+    #expect(warning == nil)
+}
+
+@Test func settingsFileWithoutDefaultsReadsAsAllOff() throws {
+    let store = tempSettings()
+    try FileManager.default.createDirectory(at: store.fileURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+    try #"{"battery_floor": 30}"#.write(to: store.fileURL, atomically: true, encoding: .utf8)
+    let (settings, warning) = store.read()
+    #expect(settings.batteryFloor == 30)
+    #expect(settings.newHoldDefaults == .off)
+    #expect(warning == nil)
+}
+
+@Test func newHoldDefaultsUseSnakeCaseKeys() throws {
+    let store = tempSettings()
+    try store.write(Settings(newHoldDefaults: NewHoldDefaults(acOnly: true, lidClosed: true)))
+    let text = try String(contentsOf: store.fileURL, encoding: .utf8)
+    #expect(text.contains("\"new_hold_defaults\""))
+    #expect(text.contains("\"ac_only\" : true"))
+    #expect(text.contains("\"lid_closed\" : true"))
+}
+
+@Test func defaultsSubscriptReadsAndWritesEachModifier() {
+    var defaults = NewHoldDefaults.off
+    for modifier in HoldModifier.allCases {
+        #expect(defaults[modifier] == false)
+        defaults[modifier] = true
+        #expect(defaults[modifier] == true)
+    }
+    #expect(defaults == NewHoldDefaults(display: true, acOnly: true, lidClosed: true))
+}
