@@ -41,7 +41,8 @@ Three answers shaped it:
 - No "add time" / extend. Cheap once the hold submenu exists, but not asked for.
 - No countdown text beside the menu bar icon.
 - No popover or custom views; the menu stays a native `NSMenu`.
-- No CLI `modify` command. The skill's contract remains on, off, status.
+- No CLI `modify` command. The skill's contract remains on, off, status, and an id
+  printed by `on` keeps releasing that hold after any menu edit.
 - No per-process release of untracked caffeinate; the service is all-or-nothing there.
 - The ended-early modal alert stays a modal. Converting it to a notification is
   already its own followup.
@@ -146,9 +147,15 @@ case setModifier(id: String, HoldModifier, Bool)
 
 A watcher exiting removes its own record **by id**. A replacement that kept the old
 id would have its record deleted by the outgoing watcher moments after the swap.
-The replacement therefore gets a **fresh id**. Nothing in the menu shows ids; a CLI
-script that stored an id and then had that hold edited from the menu is an accepted
-edge.
+The replacement therefore gets a **fresh id** and records its **lineage**: a new
+optional `replaces` field on `Hold` (JSON `replaces`) holding the id of the *first*
+hold in the chain. A replacement of a replacement carries the same original id
+forward, so any generation answers to the id the creator was given.
+
+`off(id:)` releases a hold when `id` matches either `hold.id` or `hold.replaces`.
+That keeps the skill's documented workflow (`on` prints an id, `off --id` releases
+it) working after any number of menu edits. `status --json` includes `replaces` when
+present; the human `status` and the menu do not show it.
 
 **Pure function** in `Hold.swift`:
 
@@ -160,6 +167,8 @@ public func replacementOptions(for hold: Hold, changing modifier: HoldModifier,
 Same kind, label, source, and watched pid. For a timer, `duration` is the seconds
 remaining to `expiresAt` (so the end time stays put); returns nil when under one
 second remains. The three modifier flags come from the hold with one flipped.
+`HoldOptions` gains an optional `replaces: String?`, set here to
+`hold.replaces ?? hold.id`; `on` copies it onto the record.
 
 **Service:**
 
@@ -167,12 +176,17 @@ second remains. The three modifier flags come from the hold with one flipped.
 public func modify(id: String, changing: HoldModifier, to: Bool) throws -> Hold
 ```
 
-1. Read state (this reconciles). Throw new `ServiceError.holdNotFound(id)` when the
-   hold is absent or `replacementOptions` returns nil.
+1. Read state (this reconciles). Resolve `id` against `hold.id` or `hold.replaces`.
+   Throw new `ServiceError.holdNotFound(id)` when no hold matches or
+   `replacementOptions` returns nil.
 2. `let replacement = try on(options)` — every lid-closed pre-flight, undo path, and
    battery check is reused untouched. If this throws, nothing has changed and the
    original hold is still live.
-3. `_ = try off(id: id)` — terminate the original.
+3. `_ = try off(id: original.id)` — terminate the original by its *own* id. `off`
+   matches lineage too, so this must pass the resolved hold's current id, not the
+   caller's; otherwise the replacement, which shares the lineage, would be released
+   as well. `off` therefore takes a second internal parameter, `exact: Bool`, that
+   the CLI and menu never set.
 4. Return the replacement.
 
 `on` before `off` means the Mac is never unheld. Lid transitions fall out of the
@@ -269,10 +283,35 @@ a corrupt value falls back like the floor does.
 that the new pid is alive and matched, the old pid is gone, and the hold survives
 reconciliation. `defer` terminates whatever is left of both pids.
 
-**Not tested for real: lid transitions through `modify`.** The real watcher test
-drives the watcher binary directly with `--no-flag`, which the service never
-passes. Lid transitions are covered hermetically only; this is recorded in
-`docs/followups.md`. No test calls `set()` or `clear()` on a real flag controller.
+**Real processes, lid transitions.** The service takes its watcher spawner through
+`WatcherSpawning`. A test-only conformer in `RealLidWatchTests.swift` forwards to
+`SystemWatcherSpawner` with `--no-flag` appended, so `modify` runs through the real
+service, a real watcher binary, and the real process table, with the flag, grant,
+and battery faked through `LidClosedDependencies`. The service itself never passes
+the hook. Three cases, each with a short `-t` backstop and `defer` cleanup of every
+spawned pid:
+
+- off→on: the record becomes lid-closed with a `teainate` watcher pid, the old
+  caffeinate is gone, the store marker is owned, and the hold survives
+  reconciliation.
+- on→off: the record becomes a plain caffeinate hold and the old watcher exits.
+  With `--no-flag` the watcher never touches any flag, so the marker is left owned
+  with no lid-closed hold live; the next `status()` must then run orphan cleanup
+  through the fake flag (`clear()` called, marker dropped).
+- on→on: two watchers overlap, then only the new one remains, the marker stays
+  owned, and `status()` does **not** call the fake flag's `clear()`.
+
+The watcher's own exit-time flag decision is not exercised here (its process runs
+with `--no-flag`); that logic stays covered by `LidWatchRunnerTests`. What these
+three prove is the composition: real spawn arguments, real process identity through
+`ps`, real signalling, and the record and marker state the service is left with.
+
+No test calls `set()` or `clear()` on a real flag controller.
+
+**Lineage.** `off --id` with the original id releases a once-edited and a
+twice-edited hold; `off` with the replacement's own id also works; `modify` never
+releases the replacement it just made (the `exact` path); `status --json` carries
+`replaces`; a record without the field decodes.
 
 **Hand verification** after `make-app.sh`: tick display on a live hold and confirm
 the assertion changes in `pmset -g assertions`; convert a plain hold to lid-closed
@@ -280,5 +319,6 @@ and close the lid.
 
 ## Followups created by this design
 
-- Lid transitions through `modify` have no real-process test.
-- `off --id` on an id that was replaced by a menu edit reports not found.
+None. Both edges found in review (a stale id after a menu edit, and lid
+transitions untested with real processes) are closed by lineage and the injected
+no-flag spawner above.
