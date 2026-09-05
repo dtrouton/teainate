@@ -45,28 +45,6 @@ func standardService() -> TeainateService {
         watcherExecutable: Bundle.main.executableURL ?? URL(fileURLWithPath: CommandLine.arguments[0]))
 }
 
-/// Every lid-closed refusal is a user-facing sentence, non-zero exit, stderr.
-func friendlyDescription(_ error: ServiceError) -> String? {
-    switch error {
-    case .lidClosedNotEnabled:
-        return "Lid-closed holds are not enabled. Enable them from the Teainate menu (Enable lid-closed holds…) first."
-    case .lidClosedGrantBroken(let message):
-        return "Lid-closed holds are enabled but sudo refused: \(message). Disable and re-enable them from the Teainate menu."
-    case .batteryBelowFloor(let percent, let floor):
-        return "Battery at \(percent)%, at or below the \(floor)% floor. Plug in, or raise the floor from the Teainate menu."
-    case .notOnACPower:
-        return "--ac-only with --lid-closed needs the Mac to be plugged in now."
-    case .sleepDisabledElsewhere:
-        return "Sleep is already disabled outside teainate (pmset disablesleep). An ordinary hold will work with the lid closed until that is cleared."
-    case .sleepFlagStuck(let message):
-        return "The hold failed and the sleep-disabled flag could not be cleared: \(message). Run: sudo pmset -a disablesleep 0"
-    case .lidClosedUnavailable:
-        return "Lid-closed holds are not available in this build."
-    case .noClaudeAncestor, .spawnFailed:
-        return nil
-    }
-}
-
 struct On: ParsableCommand {
     static let configuration = CommandConfiguration(
         abstract: "Start holding this Mac awake."
@@ -130,9 +108,7 @@ struct On: ParsableCommand {
             do {
                 watched = try service.resolveSessionPID()
             } catch ServiceError.noClaudeAncestor {
-                throw FriendlyError(
-                    description: "No Claude Code session found in this process tree. Use --for instead, e.g. teainate on --for 45m"
-                )
+                throw FriendlyError(description: "\(ServiceError.noClaudeAncestor)")
             }
         } else if let untilPid {
             watched = untilPid
@@ -147,13 +123,7 @@ struct On: ParsableCommand {
             lidClosed: lidClosed,
             source: session ? .claude : .cli
         )
-        let hold: Hold
-        do {
-            hold = try service.on(options)
-        } catch let error as ServiceError {
-            if let message = friendlyDescription(error) { throw FriendlyError(description: message) }
-            throw error
-        }
+        let hold = try service.on(options)
         let holdStatus = HoldStatus(
             id: hold.id, kind: hold.kind, label: hold.label, source: hold.source,
             expiresAt: hold.expiresAt, remainingSeconds: hold.remainingSeconds(now: Date()),
