@@ -114,7 +114,10 @@ public func buildMenu(
         items.append(MenuItem(title: "Turn off all", action: .releaseAll))
     }
 
-    if !status.foreignAssertions.isEmpty {
+    if !status.pmsetAvailable {
+        items.append(.separator)
+        items.append(MenuItem(title: pmsetUnavailableLine, isEnabled: false))
+    } else if !status.foreignAssertions.isEmpty {
         items.append(.separator)
         items.append(MenuItem(title: "Also keeping this Mac awake", isEnabled: false))
         for assertion in status.foreignAssertions {

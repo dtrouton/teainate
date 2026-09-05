@@ -6,11 +6,13 @@ private func status(
     holds: [HoldStatus] = [],
     foreign: [ForeignAssertion] = [],
     untracked: [UntrackedCaffeinate] = [],
-    lid: LidClosedStatus = .unavailable
+    lid: LidClosedStatus = .unavailable,
+    pmsetAvailable: Bool = true
 ) -> Status {
     Status(
         awake: !holds.isEmpty, holds: holds,
-        foreignAssertions: foreign, untrackedCaffeinate: untracked, lidClosed: lid
+        foreignAssertions: foreign, untrackedCaffeinate: untracked, lidClosed: lid,
+        pmsetAvailable: pmsetAvailable
     )
 }
 
@@ -126,6 +128,11 @@ private func titles(_ items: [MenuItem]) -> [String] {
 @Test func foreignSectionOmittedWhenEmpty() {
     let items = buildMenu(status: status(), preferences: MenuPreferences(), skillState: .current)
     #expect(!titles(items).contains("Also keeping this Mac awake"))
+}
+
+@Test func menuShowsUnavailableAssertions() {
+    let items = buildMenu(status: status(pmsetAvailable: false), preferences: MenuPreferences(), skillState: .current)
+    #expect(titles(items).contains("Other sleep assertions: unavailable (pmset failed)"))
 }
 
 @Test func untrackedSectionShowsFlagsAndOffersReclaim() {

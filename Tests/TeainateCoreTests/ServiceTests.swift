@@ -220,7 +220,20 @@ private func liveTable(_ pids: pid_t...) -> [pid_t: ProcessSnapshot] {
         now: { Date() }
     )
     // Degrades partially: own holds still reported, foreign list empty.
-    #expect(try service.status().foreignAssertions.isEmpty)
+    let status = try service.status()
+    #expect(status.foreignAssertions.isEmpty)
+    #expect(status.pmsetAvailable == false)
+}
+
+@Test func pmsetAvailableWhenReaderSucceeds() throws {
+    let service = makeService(snapshotter: StubSnapshotter(table: liveTable(100)))
+    #expect(try service.status().pmsetAvailable == true)
+}
+
+@Test func statusJSONCarriesPmsetAvailable() throws {
+    let service = makeService()
+    let json = String(decoding: try Status.encoder.encode(try service.status()), as: UTF8.self)
+    #expect(json.contains("\"pmset_available\" : true"))
 }
 
 @Test func resolveSessionPIDFindsClaudeAncestor() throws {

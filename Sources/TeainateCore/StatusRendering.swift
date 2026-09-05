@@ -1,5 +1,10 @@
 import Foundation
 
+/// Shown in place of the foreign-assertions section when `pmset -g assertions`
+/// itself failed to run — used by both the CLI's `renderStatus` and the menu's
+/// `buildMenu` so the wording exists once.
+public let pmsetUnavailableLine = "Other sleep assertions: unavailable (pmset failed)"
+
 public func renderStatus(_ status: Status) -> String {
     var lines: [String] = []
 
@@ -12,7 +17,10 @@ public func renderStatus(_ status: Status) -> String {
         }
     }
 
-    if !status.foreignAssertions.isEmpty {
+    if !status.pmsetAvailable {
+        lines.append("")
+        lines.append(pmsetUnavailableLine)
+    } else if !status.foreignAssertions.isEmpty {
         lines.append("")
         lines.append("Also keeping this Mac awake:")
         for assertion in status.foreignAssertions {

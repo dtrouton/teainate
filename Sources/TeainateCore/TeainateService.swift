@@ -149,17 +149,23 @@ public struct Status: Codable, Sendable, Equatable {
     public let foreignAssertions: [ForeignAssertion]
     public let untrackedCaffeinate: [UntrackedCaffeinate]
     public let lidClosed: LidClosedStatus
+    /// False when `pmset -g assertions` failed to run: `foreignAssertions` is then
+    /// empty because we could not read it, not because nothing else is holding the
+    /// Mac awake.
+    public let pmsetAvailable: Bool
 
     // Explicit public init: the app target constructs an empty Status as a fallback.
     public init(
         awake: Bool, holds: [HoldStatus], foreignAssertions: [ForeignAssertion],
-        untrackedCaffeinate: [UntrackedCaffeinate], lidClosed: LidClosedStatus = .unavailable
+        untrackedCaffeinate: [UntrackedCaffeinate], lidClosed: LidClosedStatus = .unavailable,
+        pmsetAvailable: Bool = true
     ) {
         self.awake = awake
         self.holds = holds
         self.foreignAssertions = foreignAssertions
         self.untrackedCaffeinate = untrackedCaffeinate
         self.lidClosed = lidClosed
+        self.pmsetAvailable = pmsetAvailable
     }
 
     enum CodingKeys: String, CodingKey {
@@ -167,6 +173,7 @@ public struct Status: Codable, Sendable, Equatable {
         case foreignAssertions = "foreign_assertions"
         case untrackedCaffeinate = "untracked_caffeinate"
         case lidClosed = "lid_closed"
+        case pmsetAvailable = "pmset_available"
     }
 
     public static var encoder: JSONEncoder {
@@ -454,8 +461,11 @@ public struct TeainateService: Sendable {
         let state = try store.readState()
         let holds = state.holds
         let current = now()
-        // pmset failing must not hide our own holds.
-        let foreign = (try? assertionReader.assertions()) ?? []
+        // pmset failing must not hide our own holds — but it must not read as
+        // "nothing else is holding the Mac awake" either.
+        let foreignResult = Result { try assertionReader.assertions() }
+        let foreign = (try? foreignResult.get()) ?? []
+        let pmsetAvailable = (try? foreignResult.get()) != nil
         // A snapshot failure must not hide our own holds either — just leave the
         // untracked list empty rather than throwing status() out entirely.
         let table = (try? snapshotter.snapshot()) ?? [:]
@@ -477,7 +487,8 @@ public struct TeainateService: Sendable {
             },
             foreignAssertions: foreign.filter { !ours.contains($0.pid) },
             untrackedCaffeinate: untracked,
-            lidClosed: lidClosedStatus(state)
+            lidClosed: lidClosedStatus(state),
+            pmsetAvailable: pmsetAvailable
         )
     }
 

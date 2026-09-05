@@ -16,6 +16,10 @@ public protocol AssertionReading: Sendable {
     func assertions() throws -> [ForeignAssertion]
 }
 
+public enum AssertionReadError: Error, Equatable {
+    case pmsetFailed(status: Int32)
+}
+
 /// Parses the "Listed by owning process:" section of `pmset -g assertions`.
 ///
 /// Lines look like:
@@ -57,6 +61,9 @@ public struct PMSetAssertionReader: AssertionReading {
         try process.run()
         let data = pipe.fileHandleForReading.readDataToEndOfFile()
         process.waitUntilExit()
+        guard process.terminationStatus == 0 else {
+            throw AssertionReadError.pmsetFailed(status: process.terminationStatus)
+        }
         return parseAssertions(String(decoding: data, as: UTF8.self))
     }
 }

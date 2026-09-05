@@ -7,9 +7,13 @@ private func status(
     holds: [HoldStatus] = [],
     foreign: [ForeignAssertion] = [],
     untracked: [UntrackedCaffeinate] = [],
-    lid: LidClosedStatus = .unavailable
+    lid: LidClosedStatus = .unavailable,
+    pmsetAvailable: Bool = true
 ) -> Status {
-    Status(awake: awake, holds: holds, foreignAssertions: foreign, untrackedCaffeinate: untracked, lidClosed: lid)
+    Status(
+        awake: awake, holds: holds, foreignAssertions: foreign, untrackedCaffeinate: untracked,
+        lidClosed: lid, pmsetAvailable: pmsetAvailable
+    )
 }
 
 private func holdStatus(
@@ -71,6 +75,12 @@ private func holdStatus(
 
 @Test func omitsForeignSectionWhenEmpty() {
     #expect(!renderStatus(status()).contains("Also keeping this Mac awake"))
+}
+
+@Test func rendersUnavailableAssertionsInsteadOfNothing() {
+    let text = renderStatus(status(awake: false, pmsetAvailable: false))
+    #expect(text.contains("Other sleep assertions: unavailable (pmset failed)"))
+    #expect(!text.contains("Also keeping this Mac awake"))
 }
 
 @Test func rendersUntrackedCaffeinateWithFlags() {

@@ -29,6 +29,15 @@ extension ServiceError: CustomStringConvertible {
     }
 }
 
+extension AssertionReadError: CustomStringConvertible {
+    public var description: String {
+        switch self {
+        case .pmsetFailed(let status):
+            return "Could not read sleep assertions (pmset exited with status \(status))."
+        }
+    }
+}
+
 extension HoldStoreError: CustomStringConvertible {
     public var description: String {
         switch self {
