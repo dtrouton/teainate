@@ -3,19 +3,26 @@ import Foundation
 @testable import TeainateCore
 
 private final class RecordingSpawner: CaffeinateSpawning, @unchecked Sendable {
+    enum Event: Equatable { case spawned([String]), terminated(pid_t) }
+
     var spawned: [[String]] = []
     var terminated: [pid_t] = []
+    var events: [Event] = []
     var nextPID: pid_t = 100
     var shouldFail = false
 
     func spawn(flags: [String]) throws -> pid_t {
         if shouldFail { throw ServiceError.spawnFailed("boom") }
         spawned.append(flags)
+        events.append(.spawned(flags))
         defer { nextPID += 1 }
         return nextPID
     }
 
-    func terminate(pid: pid_t) { terminated.append(pid) }
+    func terminate(pid: pid_t) {
+        terminated.append(pid)
+        events.append(.terminated(pid))
+    }
 }
 
 private struct StubSnapshotter: ProcessSnapshotting {
@@ -426,6 +433,11 @@ private func liveTable(_ pids: pid_t...) -> [pid_t: ProcessSnapshot] {
 
     #expect(spawner.spawned == [["-i", "-t", "3600"], ["-i", "-d", "-t", "3600"]])
     #expect(spawner.terminated == [100])
+    #expect(spawner.events == [
+        .spawned(["-i", "-t", "3600"]),
+        .spawned(["-i", "-d", "-t", "3600"]),
+        .terminated(100),
+    ])
     #expect(replacement.caffeinatePID == 101)
     #expect(replacement.id != original.id)
     #expect(replacement.replaces == original.id)
