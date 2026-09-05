@@ -60,7 +60,7 @@ public func describeEnded(_ ended: EndedHold) -> String {
     return "Last lid-closed hold\(name) ended: \(ended.reason)"
 }
 
-/// A one-line description of a hold.
+/// A one-line description of a hold for the CLI.
 ///
 /// A label never replaces the remaining time — "how much longer do I have?" is the
 /// question this tool exists to answer, so a labelled timer shows both:
@@ -79,17 +79,67 @@ public func describe(_ hold: HoldStatus, includingID: Bool = true) -> String {
         parts.append(lifetime)
     }
 
-    var modifiers: [String] = []
-    if hold.display { modifiers.append("display on") }
-    if hold.acOnly { modifiers.append("only while plugged in") }
-    if hold.lidClosed {
-        modifiers.append("lid ok")
-        if let floor = hold.batteryFloor { modifiers.append("off at \(floor)%") }
-    }
+    let modifiers = modifierFacts(for: hold)
     if !modifiers.isEmpty { parts.append("(\(modifiers.joined(separator: ", ")))") }
 
     if includingID { parts.append("[\(hold.id)]") }
     return parts.joined(separator: " ")
+}
+
+/// The menu row for a hold: what it is and how it is set, as facts joined with middle
+/// dots — `build · 42 min left · display on · lid ok`. The row opens the hold's
+/// controls, so there is no id and no verb. A Claude session with no label is named
+/// as such, because "until session exits" alone does not say whose.
+public func menuTitle(for hold: HoldStatus) -> String {
+    var facts: [String] = []
+    let subject = hold.label ?? (hold.source == .claude ? "Claude session" : nil)
+    if let subject { facts.append(subject) }
+    switch hold.kind {
+    case .forever:
+        if subject == nil { facts.append("indefinitely") }
+    case .process:
+        facts.append(subject == nil ? "until session exits" : "until it exits")
+    case .timer:
+        facts.append(defaultLabel(for: hold))
+    }
+    facts += modifierFacts(for: hold)
+    return facts.joined(separator: " · ")
+}
+
+/// The precise end of a hold, for the first row of its submenu: `until 3:12 PM`,
+/// `until pid 6707 exits`, or `indefinitely`. The date joins the time once the end is
+/// not today. `calendar` and `locale` are parameters so tests can pin them.
+public func menuDetail(
+    for hold: HoldStatus, now: Date, calendar: Calendar = .current, locale: Locale = .current
+) -> String {
+    switch hold.kind {
+    case .forever:
+        return "indefinitely"
+    case .process:
+        guard let pid = hold.watchedPID else { return "until the watched process exits" }
+        return "until pid \(pid) exits"
+    case .timer:
+        guard let end = hold.expiresAt else { return "timed" }
+        let formatter = DateFormatter()
+        formatter.calendar = calendar
+        formatter.timeZone = calendar.timeZone
+        formatter.locale = locale
+        formatter.timeStyle = .short
+        formatter.dateStyle = calendar.isDate(end, inSameDayAs: now) ? .none : .medium
+        return "until \(formatter.string(from: end))"
+    }
+}
+
+/// The modifier facts both surfaces list, in one order.
+private func modifierFacts(for hold: HoldStatus) -> [String] {
+    var facts: [String] = []
+    if hold.display { facts.append("display on") }
+    if hold.acOnly { facts.append("only while plugged in") }
+    if hold.lidClosed {
+        facts.append("lid ok")
+        if let floor = hold.batteryFloor { facts.append("off at \(floor)%") }
+    }
+    return facts
 }
 
 private func defaultLabel(for hold: HoldStatus) -> String {

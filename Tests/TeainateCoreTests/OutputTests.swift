@@ -199,3 +199,54 @@ private func holdStatus(
     #expect(text.contains("\"replaces\""))
     #expect(text.contains("\"h_1\""))
 }
+
+// Menu rows: facts joined with middle dots, no id, no verb.
+@Test func menuTitleJoinsLabelLifetimeAndModifiers() {
+    #expect(menuTitle(for: holdStatus(kind: .timer, remaining: 2520)) == "42 min left")
+    #expect(menuTitle(for: holdStatus(kind: .timer, label: "build", remaining: 2520, display: true, lidClosed: true, floor: 15))
+            == "build · 42 min left · display on · lid ok · off at 15%")
+    #expect(menuTitle(for: holdStatus(kind: .forever, acOnly: true)) == "indefinitely · only while plugged in")
+    #expect(menuTitle(for: holdStatus(kind: .forever, label: "focus time")) == "focus time")
+}
+
+@Test func menuTitleNamesAClaudeSession() {
+    let claude = HoldStatus(id: "h_c", kind: .process, label: nil, source: .claude,
+                            expiresAt: nil, remainingSeconds: nil, display: false, acOnly: false, watchedPID: 6707)
+    #expect(menuTitle(for: claude) == "Claude session · until it exits")
+    #expect(menuTitle(for: holdStatus(kind: .process)) == "until session exits")
+}
+
+private var utcEnglish: Calendar {
+    var calendar = Calendar(identifier: .gregorian)
+    calendar.timeZone = TimeZone(identifier: "UTC")!
+    calendar.locale = Locale(identifier: "en_US")
+    return calendar
+}
+
+@Test func menuDetailStatesTheTimerEndAsAClockTime() {
+    let now = ISO8601DateFormatter().date(from: "2026-09-05T14:00:00Z")!
+    let end = now.addingTimeInterval(72 * 60)                      // 15:12 UTC, same day
+    let hold = HoldStatus(id: "h_t", kind: .timer, label: nil, source: .menu,
+                          expiresAt: end, remainingSeconds: 4320, display: false, acOnly: false)
+    let text = menuDetail(for: hold, now: now, calendar: utcEnglish, locale: Locale(identifier: "en_US"))
+    #expect(text.hasPrefix("until 3:12"))
+    #expect(!text.contains("Sep"))
+}
+
+@Test func menuDetailAddsTheDateWhenTheEndIsNotToday() {
+    let now = ISO8601DateFormatter().date(from: "2026-09-05T14:00:00Z")!
+    let end = now.addingTimeInterval(25 * 3600)                    // 2026-09-06 15:00 UTC
+    let hold = HoldStatus(id: "h_t", kind: .timer, label: nil, source: .menu,
+                          expiresAt: end, remainingSeconds: 90000, display: false, acOnly: false)
+    let text = menuDetail(for: hold, now: now, calendar: utcEnglish, locale: Locale(identifier: "en_US"))
+    #expect(text.hasPrefix("until "))
+    #expect(text.contains("Sep 6"))
+    #expect(text.contains("3:00"))
+}
+
+@Test func menuDetailNamesTheWatchedProcessOrSaysIndefinitely() {
+    let watched = HoldStatus(id: "h_p", kind: .process, label: nil, source: .claude,
+                             expiresAt: nil, remainingSeconds: nil, display: false, acOnly: false, watchedPID: 6707)
+    #expect(menuDetail(for: watched, now: Date()) == "until pid 6707 exits")
+    #expect(menuDetail(for: holdStatus(kind: .forever), now: Date()) == "indefinitely")
+}
