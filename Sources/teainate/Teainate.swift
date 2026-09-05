@@ -119,7 +119,8 @@ struct On: ParsableCommand {
             id: hold.id, kind: hold.kind, label: hold.label, source: hold.source,
             expiresAt: hold.expiresAt, remainingSeconds: hold.remainingSeconds(now: Date()),
             display: hold.display, acOnly: hold.acOnly,
-            lidClosed: hold.lidClosed, batteryFloor: hold.batteryFloor
+            lidClosed: hold.lidClosed, batteryFloor: hold.batteryFloor,
+            watchedPID: hold.watchedPID, replaces: hold.replaces
         )
         print("● Holding the Mac awake — \(describe(holdStatus))")
     }

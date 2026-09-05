@@ -8,6 +8,11 @@ public enum HoldSource: String, Codable, Sendable {
     case menu, cli, claude
 }
 
+/// One of the three per-hold switches the menu can flip on a live hold.
+public enum HoldModifier: String, Sendable, Equatable, CaseIterable {
+    case display, acOnly, lidClosed
+}
+
 /// What the caller asked for. Converted into caffeinate flags and then a `Hold`.
 public struct HoldOptions: Sendable, Equatable {
     public var duration: TimeInterval?
@@ -18,6 +23,9 @@ public struct HoldOptions: Sendable, Equatable {
     /// Keep the Mac awake even with the lid closed. Needs the sudoers grant; see LidWatch.swift.
     public var lidClosed: Bool
     public var source: HoldSource
+    /// The id of the hold this one replaces (see `TeainateService.modify`). Copied
+    /// onto the record so `off --id` with the original id still finds the live hold.
+    public var replaces: String?
 
     public init(
         duration: TimeInterval? = nil,
@@ -26,7 +34,8 @@ public struct HoldOptions: Sendable, Equatable {
         display: Bool = false,
         label: String? = nil,
         lidClosed: Bool = false,
-        source: HoldSource
+        source: HoldSource,
+        replaces: String? = nil
     ) {
         self.duration = duration
         self.watchedPID = watchedPID
@@ -35,6 +44,7 @@ public struct HoldOptions: Sendable, Equatable {
         self.label = label
         self.lidClosed = lidClosed
         self.source = source
+        self.replaces = replaces
     }
 
     public var kind: HoldKind {
@@ -86,13 +96,19 @@ public struct Hold: Codable, Sendable, Equatable, Identifiable {
     /// Compared alongside the PID during reconciliation to close the PID-recycling gap;
     /// nil for records written before this field existed, which then match by name only.
     public var processStartedAt: ProcessStartTime?
+    /// Lineage: the id of the *first* hold in a chain of `modify` replacements. A
+    /// replacement never reuses an id — an exiting lid-closed watcher removes its
+    /// record by id, and would take a same-id successor with it — so this is how the
+    /// id a creator was given keeps naming the live hold.
+    public var replaces: String?
 
     public init(
         id: String, kind: HoldKind, label: String?, source: HoldSource,
         caffeinatePID: pid_t, flags: [String], startedAt: Date, expiresAt: Date?,
         watchedPID: pid_t?, display: Bool, acOnly: Bool,
         lidClosed: Bool = false, batteryFloor: Int? = nil,
-        processStartedAt: ProcessStartTime? = nil
+        processStartedAt: ProcessStartTime? = nil,
+        replaces: String? = nil
     ) {
         self.id = id
         self.kind = kind
@@ -108,6 +124,7 @@ public struct Hold: Codable, Sendable, Equatable, Identifiable {
         self.lidClosed = lidClosed
         self.batteryFloor = batteryFloor
         self.processStartedAt = processStartedAt
+        self.replaces = replaces
     }
 
     enum CodingKeys: String, CodingKey {
@@ -120,6 +137,7 @@ public struct Hold: Codable, Sendable, Equatable, Identifiable {
         case lidClosed = "lid_closed"
         case batteryFloor = "battery_floor"
         case processStartedAt = "process_started_at"
+        case replaces
     }
 
     /// Explicit so records written before lid-closed holds existed still decode.
@@ -139,6 +157,7 @@ public struct Hold: Codable, Sendable, Equatable, Identifiable {
         lidClosed = try c.decodeIfPresent(Bool.self, forKey: .lidClosed) ?? false
         batteryFloor = try c.decodeIfPresent(Int.self, forKey: .batteryFloor)
         processStartedAt = try c.decodeIfPresent(ProcessStartTime.self, forKey: .processStartedAt)
+        replaces = try c.decodeIfPresent(String.self, forKey: .replaces)
     }
 
     public func remainingSeconds(now: Date) -> Int? {

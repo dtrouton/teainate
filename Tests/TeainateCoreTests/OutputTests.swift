@@ -186,3 +186,16 @@ private func holdStatus(
     let text = renderStatus(status(holds: [holdStatus(kind: .timer, remaining: 3_500)]))
     #expect(text.contains("58 min left"))
 }
+
+@Test func statusJSONCarriesWatchedPIDAndLineage() throws {
+    let hold = HoldStatus(
+        id: "h_2", kind: .process, label: nil, source: .claude,
+        expiresAt: nil, remainingSeconds: nil, display: false, acOnly: false,
+        watchedPID: 6707, replaces: "h_1"
+    )
+    let text = String(decoding: try Status.encoder.encode(status(holds: [hold])), as: UTF8.self)
+    #expect(text.contains("\"watched_pid\""))
+    #expect(text.contains("6707"))
+    #expect(text.contains("\"replaces\""))
+    #expect(text.contains("\"h_1\""))
+}

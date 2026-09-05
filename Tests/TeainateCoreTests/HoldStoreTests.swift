@@ -214,6 +214,7 @@ private func lidHold(_ id: String, pid: pid_t) -> Hold {
     #expect(state.holds.first?.lidClosed == false)
     #expect(state.holds.first?.batteryFloor == nil)
     #expect(state.holds.first?.processStartedAt == nil)
+    #expect(state.holds.first?.replaces == nil)
     #expect(state.lidFlagOwned == false)
     #expect(state.lidFlagPendingSince == nil)
     #expect(state.lastEnded == nil)
@@ -270,4 +271,12 @@ private func lidHold(_ id: String, pid: pid_t) -> Hold {
         }
     }
     #expect(try store.read().count == 20)
+}
+
+@Test func holdRecordRoundTripsLineage() throws {
+    var h = hold("h_2", pid: 100)
+    h.replaces = "h_1"
+    let data = try Hold.encoder.encode(h)
+    #expect(String(decoding: data, as: UTF8.self).contains("\"replaces\""))
+    #expect(try Hold.decoder.decode(Hold.self, from: data) == h)
 }

@@ -76,13 +76,16 @@ public struct HoldStatus: Codable, Sendable, Equatable {
     public let acOnly: Bool
     public let lidClosed: Bool
     public let batteryFloor: Int?
+    public let watchedPID: pid_t?
+    public let replaces: String?
 
     // Explicit public init: the memberwise one is internal, and the CLI target
     // constructs these from outside the module.
     public init(
         id: String, kind: HoldKind, label: String?, source: HoldSource,
         expiresAt: Date?, remainingSeconds: Int?, display: Bool, acOnly: Bool,
-        lidClosed: Bool = false, batteryFloor: Int? = nil
+        lidClosed: Bool = false, batteryFloor: Int? = nil,
+        watchedPID: pid_t? = nil, replaces: String? = nil
     ) {
         self.id = id
         self.kind = kind
@@ -94,6 +97,8 @@ public struct HoldStatus: Codable, Sendable, Equatable {
         self.acOnly = acOnly
         self.lidClosed = lidClosed
         self.batteryFloor = batteryFloor
+        self.watchedPID = watchedPID
+        self.replaces = replaces
     }
 
     enum CodingKeys: String, CodingKey {
@@ -103,6 +108,8 @@ public struct HoldStatus: Codable, Sendable, Equatable {
         case acOnly = "ac_only"
         case lidClosed = "lid_closed"
         case batteryFloor = "battery_floor"
+        case watchedPID = "watched_pid"
+        case replaces
     }
 }
 
@@ -283,7 +290,8 @@ public struct TeainateService: Sendable {
             watchedPID: options.watchedPID,
             display: options.display,
             acOnly: options.acOnly,
-            processStartedAt: startedAt
+            processStartedAt: startedAt,
+            replaces: options.replaces
         )
         do {
             try store.mutate { $0.append(hold) }
@@ -398,7 +406,8 @@ public struct TeainateService: Sendable {
             caffeinatePID: pid, flags: flags, startedAt: started,
             expiresAt: options.duration.map { started.addingTimeInterval($0) },
             watchedPID: options.watchedPID, display: options.display, acOnly: options.acOnly,
-            lidClosed: true, batteryFloor: floor, processStartedAt: startedAt)
+            lidClosed: true, batteryFloor: floor, processStartedAt: startedAt,
+            replaces: options.replaces)
         do {
             try store.mutateState { state in
                 state.holds.append(hold)
@@ -489,7 +498,8 @@ public struct TeainateService: Sendable {
                     expiresAt: hold.expiresAt,
                     remainingSeconds: hold.remainingSeconds(now: current),
                     display: hold.display, acOnly: hold.acOnly,
-                    lidClosed: hold.lidClosed, batteryFloor: hold.batteryFloor
+                    lidClosed: hold.lidClosed, batteryFloor: hold.batteryFloor,
+                    watchedPID: hold.watchedPID, replaces: hold.replaces
                 )
             },
             // Our own processes are not foreign, and an untracked caffeinate is already
