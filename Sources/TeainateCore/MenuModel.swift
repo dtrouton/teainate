@@ -3,17 +3,18 @@ import Foundation
 public enum MenuAction: Sendable, Equatable {
     case holdFor(TimeInterval)
     case holdForever
-    case toggleACOnly
-    case toggleDisplay
+    /// Set a new-hold default. The value is what the click sets, not a toggle.
+    case setDefault(HoldModifier, Bool)
+    /// Change a live hold. The value is what the click sets.
+    case setModifier(id: String, HoldModifier, Bool)
     case release(String)
     case releaseAll
     case reclaimUntracked
     case installSkill
-    case quit
-    case toggleLidClosed
     case enableLidClosed
     case disableLidClosed
     case setBatteryFloor(Int)
+    case quit
     case none
 }
 
@@ -43,19 +44,6 @@ public struct MenuItem: Sendable, Equatable {
     public static let separator = MenuItem(title: "", isEnabled: false, isSeparator: true)
 }
 
-/// Modifiers apply to the *next* activation; they never retroactively change a running hold.
-public struct MenuPreferences: Sendable, Equatable {
-    public var acOnly: Bool
-    public var display: Bool
-    public var lidClosed: Bool
-
-    public init(acOnly: Bool = false, display: Bool = false, lidClosed: Bool = false) {
-        self.acOnly = acOnly
-        self.display = display
-        self.lidClosed = lidClosed
-    }
-}
-
 public let menuDurationChoices: [(label: String, seconds: TimeInterval)] = [
     ("15 minutes", 900), ("30 minutes", 1800),
     ("1 hour", 3600), ("2 hours", 7200), ("4 hours", 14400),
@@ -65,90 +53,129 @@ public func statusIconIsActive(_ status: Status) -> Bool {
     !status.holds.isEmpty
 }
 
+/// The options a "Keep awake for" click produces. A lid-closed default is ignored
+/// while the grant is absent — the checkbox is greyed, and a refused hold on every
+/// click would be a worse surprise than a hold without the lid.
+public func newHoldOptions(duration: TimeInterval?, defaults: NewHoldDefaults, lidEnabled: Bool) -> HoldOptions {
+    HoldOptions(
+        duration: duration, acOnly: defaults.acOnly, display: defaults.display,
+        lidClosed: defaults.lidClosed && lidEnabled, source: .menu
+    )
+}
+
+/// Five blocks, in the order you act on them: warnings, new holds, what is holding,
+/// what else is holding, settings. Every show/enable/check decision is here.
 public func buildMenu(
     status: Status,
-    preferences: MenuPreferences,
-    skillState: SkillInstallState
+    defaults: NewHoldDefaults,
+    skillState: SkillInstallState,
+    now: Date = Date()
 ) -> [MenuItem] {
     var items: [MenuItem] = []
-
-    items.append(MenuItem(title: headerTitle(status), isEnabled: false))
-    for warning in status.lidClosed.warnings {
-        items.append(MenuItem(title: "⚠ \(warning)", isEnabled: false))
-    }
-    if let ended = status.lidClosed.lastEnded {
-        items.append(MenuItem(title: describeEnded(ended), isEnabled: false))
-    }
-    items.append(.separator)
-
-    for choice in menuDurationChoices {
-        items.append(MenuItem(title: "Keep awake for \(choice.label)", action: .holdFor(choice.seconds)))
-    }
-    items.append(MenuItem(title: "Keep awake indefinitely", action: .holdForever))
-    items.append(.separator)
-
-    items.append(MenuItem(
-        title: "Only while plugged in", action: .toggleACOnly, isChecked: preferences.acOnly
-    ))
-    items.append(MenuItem(
-        title: "Keep display on", action: .toggleDisplay, isChecked: preferences.display
-    ))
-
     let lidEnabled = status.lidClosed.enabled
-    items.append(MenuItem(
-        title: lidEnabled ? "Allow closing the lid" : "Allow closing the lid (enable below)",
-        action: .toggleLidClosed, isEnabled: lidEnabled,
-        isChecked: lidEnabled && preferences.lidClosed
-    ))
 
-    if !status.holds.isEmpty {
+    // Warnings first: what you most need to know and least expect.
+    var notices = status.lidClosed.warnings.map { MenuItem(title: "⚠ \($0)", isEnabled: false) }
+    if let ended = status.lidClosed.lastEnded {
+        notices.append(MenuItem(title: describeEnded(ended), isEnabled: false))
+    }
+    if !notices.isEmpty {
+        items += notices
         items.append(.separator)
-        items.append(MenuItem(title: "Active holds", isEnabled: false))
-        for hold in status.holds {
-            // No id: you click the row to release it, so the id would be pure noise.
-            items.append(MenuItem(
-                title: "Release \(describe(hold, includingID: false))",
-                action: .release(hold.id), indent: 1
-            ))
-        }
-        items.append(MenuItem(title: "Turn off all", action: .releaseAll))
     }
 
-    if !status.pmsetAvailable {
-        items.append(.separator)
-        items.append(MenuItem(title: pmsetUnavailableLine, isEnabled: false))
-    } else if !status.foreignAssertions.isEmpty {
-        items.append(.separator)
-        items.append(MenuItem(title: "Also keeping this Mac awake", isEnabled: false))
-        for assertion in status.foreignAssertions {
-            items.append(MenuItem(
-                title: "\(assertion.process) (pid \(assertion.pid))", isEnabled: false, indent: 1
-            ))
-        }
-    }
+    // New holds: the defaults above the durations, so reading order is action order.
+    items.append(MenuItem(title: "New holds", isEnabled: false))
+    items += modifierRows(
+        display: defaults.display, acOnly: defaults.acOnly,
+        lidChecked: defaults.lidClosed && lidEnabled, lidEnabled: lidEnabled, floor: nil, indent: 1
+    ) { modifier, value in .setDefault(modifier, value) }
+    let durations = menuDurationChoices.map { MenuItem(title: $0.label, action: .holdFor($0.seconds)) }
+        + [MenuItem(title: "Indefinitely", action: .holdForever)]
+    items.append(MenuItem(title: "Keep awake for", indent: 1, submenu: durations))
+    items.append(.separator)
 
-    // Actionable, unlike foreign assertions: we can terminate these on request.
-    if !status.untrackedCaffeinate.isEmpty {
-        items.append(.separator)
-        items.append(MenuItem(title: "Not managed by teainate", isEnabled: false))
-        for process in status.untrackedCaffeinate {
-            items.append(MenuItem(
-                title: "pid \(process.pid) — \(process.arguments)", isEnabled: false, indent: 1
-            ))
-        }
+    // Holding: one row per hold, each opening its own live controls.
+    items.append(MenuItem(title: "Holding", isEnabled: false))
+    if status.holds.isEmpty {
+        items.append(MenuItem(title: "Nothing is holding the Mac awake", isEnabled: false, indent: 1))
+    }
+    for hold in status.holds {
         items.append(MenuItem(
-            title: "Release untracked caffeinate…", action: .reclaimUntracked
+            title: menuTitle(for: hold), indent: 1,
+            submenu: holdControls(hold, lidEnabled: lidEnabled, now: now)
         ))
     }
+    // Only when it would not duplicate the single Release above it.
+    if status.holds.count > 1 {
+        items.append(MenuItem(title: "Release all", action: .releaseAll, indent: 1))
+    }
+
+    let others = otherHolders(status)
+    if !others.isEmpty {
+        items.append(.separator)
+        items += others
+    }
 
     items.append(.separator)
-    items.append(skillItem(skillState))
-    items.append(.separator)
-    items.append(contentsOf: lidClosedItems(status))
-    items.append(.separator)
+    items.append(MenuItem(title: "Settings", submenu: lidClosedItems(status) + [.separator, skillItem(skillState)]))
     items.append(MenuItem(title: "Quit teainate", action: .quit))
-
     return items
+}
+
+/// The three modifier checkboxes, for the defaults block and for each hold. Each
+/// action carries the value a click sets. Turning lid-closed *off* never needs the
+/// grant, so a lid-closed hold's row stays enabled even after the grant is revoked.
+private func modifierRows(
+    display: Bool, acOnly: Bool, lidChecked: Bool, lidEnabled: Bool, floor: Int?, indent: Int,
+    action: (HoldModifier, Bool) -> MenuAction
+) -> [MenuItem] {
+    let lidUsable = lidEnabled || lidChecked
+    var lidTitle = "Allow closing the lid"
+    if !lidUsable {
+        lidTitle += " (enable in Settings)"
+    } else if lidChecked, let floor {
+        lidTitle += " (off at \(floor)%)"
+    }
+    return [
+        MenuItem(title: "Keep display on", action: action(.display, !display), isChecked: display, indent: indent),
+        MenuItem(title: "Only while plugged in", action: action(.acOnly, !acOnly), isChecked: acOnly, indent: indent),
+        MenuItem(
+            title: lidTitle, action: lidUsable ? action(.lidClosed, !lidChecked) : .none,
+            isEnabled: lidUsable, isChecked: lidChecked, indent: indent
+        ),
+    ]
+}
+
+private func holdControls(_ hold: HoldStatus, lidEnabled: Bool, now: Date) -> [MenuItem] {
+    [MenuItem(title: menuDetail(for: hold, now: now), isEnabled: false), .separator]
+        + modifierRows(
+            display: hold.display, acOnly: hold.acOnly, lidChecked: hold.lidClosed,
+            lidEnabled: lidEnabled, floor: hold.batteryFloor, indent: 0
+        ) { modifier, value in .setModifier(id: hold.id, modifier, value) }
+        + [.separator, MenuItem(title: "Release", action: .release(hold.id))]
+}
+
+/// Foreign assertions (read-only) and untracked caffeinate (releasable on request),
+/// in one section. Empty when there is nothing to list.
+private func otherHolders(_ status: Status) -> [MenuItem] {
+    var rows: [MenuItem] = []
+    if !status.pmsetAvailable {
+        rows.append(MenuItem(title: pmsetUnavailableLine, isEnabled: false, indent: 1))
+    } else {
+        rows += status.foreignAssertions.map {
+            MenuItem(title: "\($0.process) (pid \($0.pid))", isEnabled: false, indent: 1)
+        }
+    }
+    // Actionable, unlike foreign assertions: we can terminate these on request.
+    rows += status.untrackedCaffeinate.map {
+        MenuItem(title: "\($0.arguments) (pid \($0.pid), not teainate's)", isEnabled: false, indent: 1)
+    }
+    if !status.untrackedCaffeinate.isEmpty {
+        rows.append(MenuItem(title: "Release untracked caffeinate…", action: .reclaimUntracked, indent: 1))
+    }
+    guard !rows.isEmpty else { return [] }
+    return [MenuItem(title: "Also keeping this Mac awake", isEnabled: false)] + rows
 }
 
 private func lidClosedItems(_ status: Status) -> [MenuItem] {
@@ -166,14 +193,6 @@ private func lidClosedItems(_ status: Status) -> [MenuItem] {
         // Revoking under a live watcher would leave it unable to clear the flag.
         MenuItem(title: "Disable lid-closed holds…", action: .disableLidClosed, isEnabled: !liveLidHold),
     ]
-}
-
-private func headerTitle(_ status: Status) -> String {
-    guard let first = status.holds.first else { return "○ Off" }
-    if status.holds.count > 1 {
-        return "● Awake — \(status.holds.count) holds"
-    }
-    return "● Awake — \(describe(first))"
 }
 
 private func skillItem(_ state: SkillInstallState) -> MenuItem {
