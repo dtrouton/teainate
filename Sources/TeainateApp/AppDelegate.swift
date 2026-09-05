@@ -6,8 +6,8 @@ import TeainateCore
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private var statusItem: NSStatusItem!
     private var renderer: MenuRenderer!
-    private var preferences = MenuPreferences()
     private let paths = TeainatePaths.standard()
+    private var settingsStore: SettingsStore { SettingsStore(fileURL: paths.settingsFile) }
     private var cliPath: URL {
         Bundle.main.bundleURL.appendingPathComponent("Contents/MacOS/teainate")
     }
@@ -35,11 +35,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let status = (try? service.status())
             ?? Status(awake: false, holds: [], foreignAssertions: [], untrackedCaffeinate: [])
         let skillState = SkillInstaller(paths: paths, cliPath: cliPath).state()
+        let defaults = settingsStore.read().settings.newHoldDefaults
 
-        statusItem.button?.title = statusIconIsActive(status) ? "☕️" : "🍵"
-        statusItem.button?.toolTip = renderStatus(status)
+        updateIcon(active: statusIconIsActive(status), status: status)
         statusItem.menu = renderer.render(
-            buildMenu(status: status, preferences: preferences, skillState: skillState)
+            buildMenu(status: status, defaults: defaults, skillState: skillState)
         )
 
         if let ended = status.lidClosed.lastEnded, ended.at != lastReportedEnded {
@@ -49,16 +49,35 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
+    /// A template cup follows the menu bar's own colour, dark mode, and inactive
+    /// dimming. Empty when idle, filled when holding — the convention Caffeine and
+    /// KeepingYouAwake users already carry. Falls back to text if the symbol is missing.
+    private func updateIcon(active: Bool, status: Status) {
+        guard let button = statusItem.button else { return }
+        let symbol = active ? "cup.and.saucer.fill" : "cup.and.saucer"
+        let label = active ? "Teainate, holding the Mac awake" : "Teainate, idle"
+        if let image = NSImage(systemSymbolName: symbol, accessibilityDescription: label) {
+            image.isTemplate = true
+            button.image = image
+            button.title = ""
+        } else {
+            button.image = nil
+            button.title = active ? "☕️" : "🍵"
+        }
+        button.toolTip = renderStatus(status)
+    }
+
     private func handle(_ action: MenuAction) {
         switch action {
         case .holdFor(let seconds):
             start(duration: seconds)
         case .holdForever:
             start(duration: nil)
-        case .toggleACOnly:
-            preferences.acOnly.toggle()
-        case .toggleDisplay:
-            preferences.display.toggle()
+        case .setDefault(let modifier, let value):
+            updateSettings(failure: "Could not save the new-hold defaults.") { $0.newHoldDefaults[modifier] = value }
+        case .setModifier(let id, let modifier, let value):
+            do { _ = try service.modify(id: id, changing: modifier, to: value) }
+            catch { present(error: "Could not change the hold.", detail: "\(error)") }
         case .release(let id):
             do { _ = try service.off(id: id) }
             catch { present(error: "Could not release the hold.", detail: "\(error)") }
@@ -71,30 +90,31 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             installSkill()
         case .quit:
             NSApp.terminate(nil)
-        case .toggleLidClosed:
-            preferences.lidClosed.toggle()
         case .enableLidClosed:
             runAsAdmin(script: { try grant.installScript() }, failure: "Could not enable lid-closed holds.")
         case .disableLidClosed:
             runAsAdmin(script: { try grant.removeScript() }, failure: "Could not disable lid-closed holds.")
         case .setBatteryFloor(let floor):
-            do { try SettingsStore(fileURL: paths.settingsFile).write(Settings(batteryFloor: floor)) }
-            catch { present(error: "Could not save the battery floor.", detail: "\(error)") }
+            updateSettings(failure: "Could not save the battery floor.") { $0.batteryFloor = floor }
         case .none:
             break
         }
         refresh()
     }
 
+    /// Read-modify-write of settings.json, so changing one field keeps the others.
+    private func updateSettings(failure: String, _ change: (inout Settings) -> Void) {
+        var settings = settingsStore.read().settings
+        change(&settings)
+        do { try settingsStore.write(settings) }
+        catch { present(error: failure, detail: "\(error)") }
+    }
+
     private func start(duration: TimeInterval?) {
+        let defaults = settingsStore.read().settings.newHoldDefaults
+        let lidEnabled = (try? service.status())?.lidClosed.enabled ?? false
         do {
-            _ = try service.on(HoldOptions(
-                duration: duration,
-                acOnly: preferences.acOnly,
-                display: preferences.display,
-                lidClosed: preferences.lidClosed,
-                source: .menu
-            ))
+            _ = try service.on(newHoldOptions(duration: duration, defaults: defaults, lidEnabled: lidEnabled))
         } catch {
             present(error: "Could not start the hold.", detail: "\(error)")
         }
