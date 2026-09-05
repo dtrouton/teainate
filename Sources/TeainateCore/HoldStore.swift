@@ -43,18 +43,24 @@ public func ownedPIDs(of holds: [Hold], in table: [pid_t: ProcessSnapshot]) -> S
     return owned
 }
 
+/// How long `status` keeps warning after a corrupt state file was backed up and reset.
+public let stateResetWarningPeriod: TimeInterval = 600
+
 public struct HoldStore: Sendable {
     private let fileURL: URL
     private let snapshotter: any ProcessSnapshotting
     private let startTimes: any ProcessStartTimeReading
+    private let now: @Sendable () -> Date
 
     public init(
         fileURL: URL, snapshotter: any ProcessSnapshotting,
-        startTimes: any ProcessStartTimeReading = ProcPIDInfoStartTimeReader()
+        startTimes: any ProcessStartTimeReading = ProcPIDInfoStartTimeReader(),
+        now: @escaping @Sendable () -> Date = { Date() }
     ) {
         self.fileURL = fileURL
         self.snapshotter = snapshotter
         self.startTimes = startTimes
+        self.now = now
     }
 
     public func read() throws -> [Hold] {
@@ -77,7 +83,8 @@ public struct HoldStore: Sendable {
         let descriptor = try acquireLock()
         defer { flock(descriptor, LOCK_UN); close(descriptor) }
 
-        var state = loadRaw()
+        var (state, wasReset) = loadRaw()
+        if wasReset { state.stateResetAt = now() }
         state.holds = reconcile(
             state.holds, against: try snapshotter.snapshot(), startTime: startTimes.startTime(of:)
         )
@@ -113,16 +120,18 @@ public struct HoldStore: Sendable {
         return descriptor
     }
 
-    private func loadRaw() -> StoreState {
-        guard let data = try? Data(contentsOf: fileURL), !data.isEmpty else { return StoreState() }
+    /// `wasReset` is true only when the file existed and failed to parse — never for
+    /// a simply-missing or empty file, which is the ordinary "no state yet" case.
+    private func loadRaw() -> (state: StoreState, wasReset: Bool) {
+        guard let data = try? Data(contentsOf: fileURL), !data.isEmpty else { return (StoreState(), false) }
         do {
-            return try Hold.decoder.decode(StoreState.self, from: data)
+            return (try Hold.decoder.decode(StoreState.self, from: data), false)
         } catch {
             // Never crash over a bad file: preserve it for diagnosis and start clean.
             let backup = fileURL.appendingPathExtension("bak")
             try? FileManager.default.removeItem(at: backup)
             try? FileManager.default.moveItem(at: fileURL, to: backup)
-            return StoreState()
+            return (StoreState(), true)
         }
     }
 

@@ -128,27 +128,35 @@ private func holdStatus(
 
 @Test func rendersLidClosedWarning() {
     let lid = LidClosedStatus(enabled: true, flagSet: true, flagSetBy: "teainate", batteryFloor: 15,
-                              lastEnded: nil, warning: "The sleep-disabled flag is set and teainate cannot clear it. Run: sudo pmset -a disablesleep 0")
+                              lastEnded: nil, warnings: ["The sleep-disabled flag is set and teainate cannot clear it. Run: sudo pmset -a disablesleep 0"])
     let text = renderStatus(status(awake: false, lid: lid))
     #expect(text.contains("⚠ The sleep-disabled flag is set"))
 }
 
+@Test func rendersEveryWarningOnItsOwnLine() {
+    let lid = LidClosedStatus(enabled: true, flagSet: true, flagSetBy: "teainate", batteryFloor: 15,
+                              lastEnded: nil, warnings: ["first warning", "second warning"])
+    let text = renderStatus(status(awake: false, lid: lid))
+    #expect(text.contains("⚠ first warning"))
+    #expect(text.contains("⚠ second warning"))
+}
+
 @Test func rendersLastEndedReason() {
     let ended = EndedHold(id: "h_x", label: "build", reason: "battery 14% at floor 15%", at: Date())
-    let lid = LidClosedStatus(enabled: true, flagSet: false, flagSetBy: nil, batteryFloor: 15, lastEnded: ended, warning: nil)
+    let lid = LidClosedStatus(enabled: true, flagSet: false, flagSetBy: nil, batteryFloor: 15, lastEnded: ended, warnings: [])
     let text = renderStatus(status(awake: false, lid: lid))
     #expect(text.contains("Last lid-closed hold (build) ended: battery 14% at floor 15%"))
 }
 
 @Test func rendersEnablementLine() {
-    let off = LidClosedStatus(enabled: false, flagSet: false, flagSetBy: nil, batteryFloor: 15, lastEnded: nil, warning: nil)
+    let off = LidClosedStatus(enabled: false, flagSet: false, flagSetBy: nil, batteryFloor: 15, lastEnded: nil, warnings: [])
     #expect(renderStatus(status(awake: false, lid: off)).contains("Lid-closed holds: not enabled"))
-    let on = LidClosedStatus(enabled: true, flagSet: false, flagSetBy: nil, batteryFloor: 30, lastEnded: nil, warning: nil)
+    let on = LidClosedStatus(enabled: true, flagSet: false, flagSetBy: nil, batteryFloor: 30, lastEnded: nil, warnings: [])
     #expect(renderStatus(status(awake: false, lid: on)).contains("Lid-closed holds: enabled (battery floor 30%)"))
 }
 
 @Test func statusJSONCarriesLidClosedKeys() throws {
-    let lid = LidClosedStatus(enabled: true, flagSet: true, flagSetBy: "other", batteryFloor: 15, lastEnded: nil, warning: nil)
+    let lid = LidClosedStatus(enabled: true, flagSet: true, flagSetBy: "other", batteryFloor: 15, lastEnded: nil, warnings: [])
     let data = try Status.encoder.encode(status(holds: [holdStatus(lidClosed: true, floor: 15)], lid: lid))
     let json = String(decoding: data, as: UTF8.self)
     #expect(json.contains("\"lid_closed\""))

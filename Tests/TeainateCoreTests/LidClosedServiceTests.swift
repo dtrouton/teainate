@@ -12,6 +12,7 @@ private final class FakeFlag: SleepFlagControlling, @unchecked Sendable {
     var clearAttempts = 0
     var failSet = false
     var failClear = false
+    var failIsSet = false
     func set() throws {
         if failSet { throw SleepFlagError.commandFailed(status: 1, message: "sudo: a password is required") }
         setCount += 1; value = true
@@ -21,7 +22,10 @@ private final class FakeFlag: SleepFlagControlling, @unchecked Sendable {
         if failClear { throw SleepFlagError.commandFailed(status: 1, message: "sudo: a password is required") }
         clearCount += 1; value = false
     }
-    func isSet() throws -> Bool { value }
+    func isSet() throws -> Bool {
+        if failIsSet { throw SleepFlagError.commandFailed(status: 1, message: "pmset -g failed") }
+        return value
+    }
 }
 
 private struct FakeGrant: PrivilegeGranting {
@@ -94,7 +98,7 @@ private struct Rig {
         let snap = StubSnapshotter(table: table)
         let clock = self.clock
         service = TeainateService(
-            store: HoldStore(fileURL: stateFile, snapshotter: storeSnapshotter ?? snap),
+            store: HoldStore(fileURL: stateFile, snapshotter: storeSnapshotter ?? snap, now: { clock.time }),
             spawner: spawner, assertionReader: StubAssertions(value: foreign), snapshotter: snap,
             now: { clock.time },
             lidClosed: LidClosedDependencies(
@@ -360,7 +364,7 @@ private struct Rig {
 
     #expect(rig.flag.clearCount == 1)
     #expect(status.lidClosed.flagSet == false)
-    #expect(status.lidClosed.warning == nil)
+    #expect(status.lidClosed.warnings.isEmpty)
 }
 
 @Test func orphanedFlagThatCannotBeClearedWarns() throws {
@@ -371,7 +375,7 @@ private struct Rig {
         .mutateState { $0.lidFlagOwned = true }
 
     let status = try rig.service.status()
-    #expect(status.lidClosed.warning?.contains("sudo pmset -a disablesleep 0") == true)
+    #expect(status.lidClosed.warnings.contains { $0.contains("sudo pmset -a disablesleep 0") })
     #expect(status.lidClosed.flagSetBy == "teainate")
 }
 
@@ -386,7 +390,7 @@ private struct Rig {
         .mutateState { $0.lidFlagOwned = true }
     let status = try rig.service.status()
     #expect(status.lidClosed.flagSetBy == nil)
-    #expect(status.lidClosed.warning == nil)
+    #expect(status.lidClosed.warnings.isEmpty)
     #expect(rig.flag.clearAttempts == 0)
     let state = try HoldStore(fileURL: rig.stateFile, snapshotter: StubSnapshotter(table: [:])).readState()
     #expect(state.lidFlagOwned == false)
@@ -398,7 +402,7 @@ private struct Rig {
     let status = try rig.service.status()
     #expect(rig.flag.clearCount == 0)
     #expect(status.lidClosed.flagSetBy == "other")
-    #expect(status.lidClosed.warning?.contains("outside teainate") == true)
+    #expect(status.lidClosed.warnings.contains { $0.contains("outside teainate") })
 }
 
 @Test func watcherChildIsNeitherUntrackedNorForeign() throws {
@@ -438,6 +442,35 @@ private struct Rig {
     _ = try rig.service.on(HoldOptions(source: .cli))
 
     #expect(rig.flag.clearCount == 1)
+}
+
+@Test func unreadableFlagIsReportedAsUnknownNotFalse() throws {
+    let rig = Rig(table: [:])
+    rig.flag.failIsSet = true
+    let status = try rig.service.status()
+    #expect(status.lidClosed.flagSet == nil)
+    #expect(status.lidClosed.flagSetBy == nil)
+    #expect(status.lidClosed.warnings.contains { $0.contains("Could not read the sleep-disabled flag") })
+}
+
+@Test func settingsWarningSurvivesAFlagWarning() throws {
+    let rig = Rig(table: [:])
+    try FileManager.default.createDirectory(at: rig.settings.fileURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+    try "{ nope".write(to: rig.settings.fileURL, atomically: true, encoding: .utf8)
+    rig.flag.value = true                    // set by someone else
+    let warnings = try rig.service.status().lidClosed.warnings
+    #expect(warnings.contains { $0.contains("settings.json") })
+    #expect(warnings.contains { $0.contains("outside teainate") })
+}
+
+@Test func corruptStateFileWarnsForTenMinutesThenStops() throws {
+    let rig = Rig(table: [:])
+    try FileManager.default.createDirectory(at: rig.stateFile.deletingLastPathComponent(), withIntermediateDirectories: true)
+    try "{ not json".write(to: rig.stateFile, atomically: true, encoding: .utf8)
+
+    #expect(try rig.service.status().lidClosed.warnings.contains { $0.contains("state file was corrupt") })
+    rig.clock.advance(by: 601)
+    #expect(try rig.service.status().lidClosed.warnings.isEmpty)
 }
 
 @Test func lidClosedUnavailableWithoutDependencies() {

@@ -118,21 +118,22 @@ public struct UntrackedCaffeinate: Codable, Sendable, Equatable {
 
 public struct LidClosedStatus: Codable, Sendable, Equatable {
     public let enabled: Bool
-    public let flagSet: Bool
-    /// "teainate", "other", or nil when the flag is not set.
+    /// nil when `pmset -g` could not be read: unknown, not false.
+    public let flagSet: Bool?
+    /// "teainate", "other", or nil unless `flagSet == true`.
     public let flagSetBy: String?
     public let batteryFloor: Int
     public let lastEnded: EndedHold?
-    public let warning: String?
+    public let warnings: [String]
 
-    public init(enabled: Bool, flagSet: Bool, flagSetBy: String?, batteryFloor: Int,
-                lastEnded: EndedHold?, warning: String?) {
+    public init(enabled: Bool, flagSet: Bool?, flagSetBy: String?, batteryFloor: Int,
+                lastEnded: EndedHold?, warnings: [String]) {
         self.enabled = enabled; self.flagSet = flagSet; self.flagSetBy = flagSetBy
-        self.batteryFloor = batteryFloor; self.lastEnded = lastEnded; self.warning = warning
+        self.batteryFloor = batteryFloor; self.lastEnded = lastEnded; self.warnings = warnings
     }
 
     enum CodingKeys: String, CodingKey {
-        case enabled, warning
+        case enabled, warnings
         case flagSet = "flag_set"
         case flagSetBy = "flag_set_by"
         case batteryFloor = "battery_floor"
@@ -141,7 +142,7 @@ public struct LidClosedStatus: Codable, Sendable, Equatable {
 
     public static let unavailable = LidClosedStatus(
         enabled: false, flagSet: false, flagSetBy: nil,
-        batteryFloor: defaultBatteryFloor, lastEnded: nil, warning: nil)
+        batteryFloor: defaultBatteryFloor, lastEnded: nil, warnings: [])
 }
 
 public struct Status: Codable, Sendable, Equatable {
@@ -422,6 +423,8 @@ public struct TeainateService: Sendable {
             guard state.lidFlagOwned, !state.holds.contains(where: \.lidClosed),
                   !lidFlagPendingWithinGrace(state, now: now())
             else { return }
+            // Unknown means attempt the clear; `status` reports unknown rather than
+            // guessing the other way.
             let flagSet = (try? lid.flag.isSet()) ?? true
             if !flagSet || (try? lid.flag.clear()) != nil {
                 state.lidFlagOwned = false
@@ -498,20 +501,26 @@ public struct TeainateService: Sendable {
 
     private func lidClosedStatus(_ state: StoreState) -> LidClosedStatus {
         guard let lid = lidClosed else { return .unavailable }
-        let flagSet = (try? lid.flag.isSet()) ?? false
+        let flagSet: Bool? = try? lid.flag.isSet()
         let (settings, settingsWarning) = lid.settings.read()
         let liveLid = state.holds.contains(where: \.lidClosed)
-        let flagSetBy: String? = flagSet ? (state.lidFlagOwned ? "teainate" : "other") : nil
+        let flagSetBy: String? = flagSet == true ? (state.lidFlagOwned ? "teainate" : "other") : nil
 
-        var warning = settingsWarning
-        if state.lidFlagOwned && !liveLid && flagSet {
-            warning = "The sleep-disabled flag is set and teainate cannot clear it. Run: sudo pmset -a disablesleep 0"
-        } else if flagSet && !state.lidFlagOwned {
-            warning = "Sleep is disabled outside teainate (pmset disablesleep); this Mac will not sleep with the lid closed until that is cleared."
+        var warnings: [String] = []
+        if let settingsWarning { warnings.append(settingsWarning) }
+        if flagSet == nil {
+            warnings.append("Could not read the sleep-disabled flag (pmset -g failed).")
+        } else if state.lidFlagOwned && !liveLid && flagSet == true {
+            warnings.append("The sleep-disabled flag is set and teainate cannot clear it. Run: sudo pmset -a disablesleep 0")
+        } else if flagSet == true && !state.lidFlagOwned {
+            warnings.append("Sleep is disabled outside teainate (pmset disablesleep); this Mac will not sleep with the lid closed until that is cleared.")
+        }
+        if let reset = state.stateResetAt, now().timeIntervalSince(reset) < stateResetWarningPeriod {
+            warnings.append("The state file was corrupt and has been reset; if this Mac will not sleep, run: sudo pmset -a disablesleep 0")
         }
         return LidClosedStatus(
             enabled: lid.grant.isGranted(), flagSet: flagSet, flagSetBy: flagSetBy,
-            batteryFloor: settings.batteryFloor, lastEnded: state.lastEnded, warning: warning)
+            batteryFloor: settings.batteryFloor, lastEnded: state.lastEnded, warnings: warnings)
     }
 
     /// Terminates caffeinate processes teainate did not start.

@@ -164,6 +164,17 @@ private func lidHold(_ id: String, pid: pid_t) -> Hold {
     #expect(FileManager.default.fileExists(atPath: backup.path))
 }
 
+@Test func corruptFileRecordsWhenItWasReset() throws {
+    let url = tempFile()
+    try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+    try "{ not valid json".write(to: url, atomically: true, encoding: .utf8)
+    let now = Date(timeIntervalSince1970: 5_000)
+    let store = HoldStore(fileURL: url, snapshotter: FakeSnapshotter(table: [:]), now: { now })
+    #expect(try store.readState().stateResetAt == now)
+    // Persisted: a second store on the same file still sees it.
+    #expect(try HoldStore(fileURL: url, snapshotter: FakeSnapshotter(table: [:])).readState().stateResetAt == now)
+}
+
 @Test func realSpawnedCaffeinateSurvivesReconciliation() throws {
     // Regression test: SystemCaffeinateSpawner execs /usr/bin/caffeinate by absolute
     // path, and `ps -o comm=` reports the executable's path (truncated to its column

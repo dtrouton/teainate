@@ -186,15 +186,19 @@ public struct StoreState: Codable, Sendable, Equatable {
     public var lidFlagOwned: Bool
     public var lidFlagPendingSince: Date?
     public var lastEnded: EndedHold?
+    /// When the state file was last found corrupt and reset to empty. `status` warns
+    /// about it for `stateResetWarningPeriod` after this, then falls silent.
+    public var stateResetAt: Date?
 
     public init(
         holds: [Hold] = [], lidFlagOwned: Bool = false, lidFlagPendingSince: Date? = nil,
-        lastEnded: EndedHold? = nil
+        lastEnded: EndedHold? = nil, stateResetAt: Date? = nil
     ) {
         self.holds = holds
         self.lidFlagOwned = lidFlagOwned
         self.lidFlagPendingSince = lidFlagPendingSince
         self.lastEnded = lastEnded
+        self.stateResetAt = stateResetAt
     }
 
     enum CodingKeys: String, CodingKey {
@@ -202,6 +206,7 @@ public struct StoreState: Codable, Sendable, Equatable {
         case lidFlagOwned = "lid_flag_owned"
         case lidFlagPendingSince = "lid_flag_pending_since"
         case lastEnded = "last_ended"
+        case stateResetAt = "state_reset_at"
     }
 
     /// Accepts both the current object shape and the original bare array.
@@ -212,11 +217,13 @@ public struct StoreState: Codable, Sendable, Equatable {
             lidFlagOwned = try c.decodeIfPresent(Bool.self, forKey: .lidFlagOwned) ?? false
             lidFlagPendingSince = try c.decodeIfPresent(Date.self, forKey: .lidFlagPendingSince)
             lastEnded = try c.decodeIfPresent(EndedHold.self, forKey: .lastEnded)
+            stateResetAt = try c.decodeIfPresent(Date.self, forKey: .stateResetAt)
         } else {
             holds = try decoder.singleValueContainer().decode([Hold].self)
             lidFlagOwned = false
             lidFlagPendingSince = nil
             lastEnded = nil
+            stateResetAt = nil
         }
     }
 }

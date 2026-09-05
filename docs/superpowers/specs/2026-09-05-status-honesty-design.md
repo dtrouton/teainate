@@ -62,10 +62,13 @@ unreadable flag as "assume set, attempt the clear"; `status` no longer contradic
 by reporting `false`, it reports unknown plus the warning "Could not read the
 sleep-disabled flag (pmset -g failed)."
 
-`HoldStore` reports a corrupt-file reset: `mutateState` records that `loadRaw` backed
-the file up, and `StoreState` carries a transient, non-persisted `recoveredFromCorruptFile`
-flag the service turns into the warning "The state file was corrupt and has been
-reset; if this Mac will not sleep, run: sudo pmset -a disablesleep 0". This also
+`HoldStore` reports a corrupt-file reset: `loadRaw` returns whether it just backed a
+corrupt file up, and `mutateState` stamps `StoreState.stateResetAt` with the current
+time when it did. This is persisted (JSON `state_reset_at`), not transient — the
+app's 15 s refresh would otherwise consume a transient flag before the user ever saw
+it. `status` turns a recent stamp into the warning "The state file was corrupt and
+has been reset; if this Mac will not sleep, run: sudo pmset -a disablesleep 0" for
+`stateResetWarningPeriod` (ten minutes) after the reset, then falls silent. This also
 closes the "state-file corruption recovers silently" item.
 
 Renderers (`renderStatus`, `buildMenu`) print every warning, one line each, prefixed

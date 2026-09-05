@@ -26,8 +26,8 @@ private func holdStatus(
     )
 }
 
-private let granted = LidClosedStatus(enabled: true, flagSet: false, flagSetBy: nil, batteryFloor: 15, lastEnded: nil, warning: nil)
-private let notGranted = LidClosedStatus(enabled: false, flagSet: false, flagSetBy: nil, batteryFloor: 15, lastEnded: nil, warning: nil)
+private let granted = LidClosedStatus(enabled: true, flagSet: false, flagSetBy: nil, batteryFloor: 15, lastEnded: nil, warnings: [])
+private let notGranted = LidClosedStatus(enabled: false, flagSet: false, flagSetBy: nil, batteryFloor: 15, lastEnded: nil, warnings: [])
 
 private func titles(_ items: [MenuItem]) -> [String] {
     items.filter { !$0.isSeparator }.map(\.title)
@@ -254,14 +254,22 @@ private func titles(_ items: [MenuItem]) -> [String] {
 
 @Test func headerShowsWarningLine() {
     let warned = LidClosedStatus(enabled: true, flagSet: true, flagSetBy: "teainate", batteryFloor: 15, lastEnded: nil,
-                                 warning: "The sleep-disabled flag is set and teainate cannot clear it. Run: sudo pmset -a disablesleep 0")
+                                 warnings: ["The sleep-disabled flag is set and teainate cannot clear it. Run: sudo pmset -a disablesleep 0"])
     let items = buildMenu(status: status(lid: warned), preferences: MenuPreferences(), skillState: .current)
     #expect(titles(items)[1].hasPrefix("⚠ The sleep-disabled flag is set"))
 }
 
+@Test func headerShowsEveryWarningOnItsOwnLine() {
+    let warned = LidClosedStatus(enabled: true, flagSet: true, flagSetBy: "teainate", batteryFloor: 15, lastEnded: nil,
+                                 warnings: ["first warning", "second warning"])
+    let items = buildMenu(status: status(lid: warned), preferences: MenuPreferences(), skillState: .current)
+    #expect(titles(items).contains("⚠ first warning"))
+    #expect(titles(items).contains("⚠ second warning"))
+}
+
 @Test func showsLastEndedReason() {
     let ended = EndedHold(id: "h_x", label: "build", reason: "battery 14% at floor 15%", at: Date())
-    let lid = LidClosedStatus(enabled: true, flagSet: false, flagSetBy: nil, batteryFloor: 15, lastEnded: ended, warning: nil)
+    let lid = LidClosedStatus(enabled: true, flagSet: false, flagSetBy: nil, batteryFloor: 15, lastEnded: ended, warnings: [])
     let items = buildMenu(status: status(lid: lid), preferences: MenuPreferences(), skillState: .current)
     #expect(titles(items).contains("Last lid-closed hold (build) ended: battery 14% at floor 15%"))
 }

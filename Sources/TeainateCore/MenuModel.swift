@@ -73,7 +73,7 @@ public func buildMenu(
     var items: [MenuItem] = []
 
     items.append(MenuItem(title: headerTitle(status), isEnabled: false))
-    if let warning = status.lidClosed.warning {
+    for warning in status.lidClosed.warnings {
         items.append(MenuItem(title: "⚠ \(warning)", isEnabled: false))
     }
     if let ended = status.lidClosed.lastEnded {

@@ -41,7 +41,7 @@ public func renderStatus(_ status: Status) -> String {
 
     let lid = status.lidClosed
     lines.append("")
-    if let warning = lid.warning {
+    for warning in lid.warnings {
         lines.append("⚠ \(warning)")
     }
     if let ended = lid.lastEnded {
