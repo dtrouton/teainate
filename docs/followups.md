@@ -43,6 +43,26 @@ hold whose caffeinate has already exited.
 - **`On.validate()` hand-rolls duration error text via `ValidationError`**,
   duplicating the messages `Errors.swift` already builds. One source of truth
   would keep them from drifting apart.
+- **The corrupt-state-file warning has two gaps.** `loadRaw` reports a reset even when
+  moving the corrupt file to `.bak` failed (both `FileManager` calls are `try?`), so
+  the warning can promise a preserved file that does not exist; and if the mutation
+  that discovered the corruption throws before persisting (the reachable case is
+  `onLidClosed`'s "sleep disabled elsewhere" pre-flight), the reset stamp is lost
+  while the file has already been moved, so that one recovery goes unreported.
+- **The corrupt-state-file warning rides in `lid_closed.warnings`.** It is suppressed
+  whenever lid-closed dependencies are absent, which never happens in production
+  (CLI and app always supply a watcher path) but is the wrong home for a warning
+  about `holds.json`. A top-level `warnings` list on `Status` would be honest; the
+  spec placed it where it is.
+- **`stateResetAt` is never cleared and the ten-minute check is one-sided.** A
+  backwards clock step makes the warning reappear until the clock catches up. A
+  `0 ..< stateResetWarningPeriod` range check closes it.
+- **`On.run`'s `noClaudeAncestor` catch is now a no-op.** It rethrows a
+  `FriendlyError` whose text is byte-identical to what ArgumentParser prints for the
+  original `ServiceError`; the `do`/`catch` can go.
+- **"Sudo pmset exited with status…" reads oddly.** The opening was capitalised to
+  satisfy the sentence test; "The sudo pmset command exited with status…" is the
+  natural fix.
 - **A process-kind hold cannot say which process it is watching.** `watched_pid`
   is recorded but never surfaced, so "until session exits" is all the user gets.
 - **Long holds render in minutes.** A 30-day hold reads `43200 min left`.
