@@ -112,7 +112,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func start(duration: TimeInterval?) {
         let defaults = settingsStore.read().settings.newHoldDefaults
-        let lidEnabled = (try? service.status())?.lidClosed.enabled ?? false
+        let lidEnabled = grant.isGranted()
         do {
             _ = try service.on(newHoldOptions(duration: duration, defaults: defaults, lidEnabled: lidEnabled))
         } catch {

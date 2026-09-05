@@ -476,6 +476,9 @@ public struct TeainateService: Sendable {
     /// replacement carries a fresh id (see `Hold.replaces` for why) and the original's
     /// lineage. For a moment both holds are live and `status` reports both — true, if
     /// brief.
+    ///
+    /// A lid-closed replacement takes the battery floor in settings *now*, not the floor
+    /// the original was taken with — it is a new hold, and its row says which floor it has.
     public func modify(id: String, changing modifier: HoldModifier, to value: Bool) throws -> Hold {
         let holds = try store.read()
         guard let original = holds.first(where: { $0.id == id }) ?? holds.first(where: { $0.replaces == id }),

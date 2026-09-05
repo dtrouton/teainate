@@ -200,6 +200,10 @@ The two-hold window is milliseconds long and visible only to a concurrent
 succeeded (only a lock timeout can cause this) both remain and the next refresh
 shows both rows.
 
+A lid-closed replacement takes the battery floor currently in settings, not the
+floor the original was taken with. It is a new hold, and its menu row shows its
+floor.
+
 `ServiceError.holdNotFound` gets a sentence: "No hold with id 'h_…'. It may have
 already ended."
 
@@ -223,7 +227,10 @@ battery floor. `TeainateService.status()` is unchanged; the app reads defaults v
 `SettingsStore.read()` on each refresh.
 
 A lid-closed default that is set while the grant is later revoked is harmless: the
-lid checkbox is greyed, and `on` refuses with `lidClosedNotEnabled` if reached.
+lid checkbox is greyed and unchecked, and `newHoldOptions` drops the lid from the
+new hold rather than letting `on` refuse it, so every "Keep awake for" click still
+produces a hold. The default itself stays stored and reappears when the grant is
+restored.
 
 ## 4. Icon and visual language
 

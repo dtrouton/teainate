@@ -19,7 +19,7 @@ cp -r Teainate.app /Applications/
 open /Applications/Teainate.app
 ```
 
-Then click **Install Claude Code skill…** in the menu.
+Then click **Settings ▸ Install Claude Code skill…** in the menu.
 
 ## Usage
 
@@ -68,9 +68,10 @@ teainate on --lid-closed --for 2h
 teainate on --lid-closed --session
 ```
 
-It needs a one-time grant from the menu (**Enable lid-closed holds…**), which writes
+It needs a one-time grant from **Settings ▸ Enable lid-closed holds…**, which writes
 `/etc/sudoers.d/teainate-<you>` allowing exactly two commands: `pmset -a disablesleep 1`
-and `0`. Nothing else can run through it, and **Disable lid-closed holds…** removes it.
+and `0`. Nothing else can run through it, and **Settings ▸ Disable lid-closed holds…**
+removes it.
 
 Safety rails: a battery floor (default 15%, set from the menu) ends the hold before
 the battery drains; command-line holds must have a duration (max 8 h) or a watched
