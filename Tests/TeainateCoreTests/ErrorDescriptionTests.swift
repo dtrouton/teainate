@@ -37,3 +37,7 @@ private func isSentence(_ error: any Error) -> Bool {
 @Test func sudoFailureNamesTheCommandNaturally() {
     #expect("\(SleepFlagError.commandFailed(status: 1, message: "denied"))".hasPrefix("The sudo pmset command exited"))
 }
+
+@Test func holdNotFoundReadsAsASentence() {
+    #expect("\(ServiceError.holdNotFound("h_1"))" == "No hold with id 'h_1'. It may have already ended.")
+}

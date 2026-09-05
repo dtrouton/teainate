@@ -13,6 +13,7 @@ public enum ServiceError: Error, Equatable {
     /// failed, and clearing it failed too. The message carries both errors.
     case sleepFlagStuck(String)
     case durationTooLong
+    case holdNotFound(String)
 }
 
 /// How long an in-flight `on` gets before orphan cleanup elsewhere (another process, the
@@ -443,9 +444,17 @@ public struct TeainateService: Sendable {
     }
 
     /// Releases one hold by id, or every hold when `id` is nil. Returns what was released.
-    public func off(id: String?) throws -> [Hold] {
+    ///
+    /// An id matches a hold's own id or its lineage (`replaces`), so the id `on` printed
+    /// keeps releasing that hold after the menu has edited it. `exact` restricts the
+    /// match to the hold's own id: `modify` uses it to release the original without
+    /// also releasing the replacement it just made, which shares the lineage.
+    public func off(id: String?, exact: Bool = false) throws -> [Hold] {
         let released = try store.mutate { holds -> [Hold] in
-            let matching = holds.filter { id == nil || $0.id == id }
+            let matching = holds.filter { hold in
+                guard let id else { return true }
+                return hold.id == id || (!exact && hold.replaces == id)
+            }
             holds.removeAll { hold in matching.contains { $0.id == hold.id } }
             return matching
         }
@@ -457,6 +466,24 @@ public struct TeainateService: Sendable {
         // retries this cleanup.
         try? clearOrphanedFlag()
         return released
+    }
+
+    /// Recreates one live hold with a modifier flipped, keeping its lifetime.
+    ///
+    /// `on` first, `off` second: the replacement is spawned and recorded before the
+    /// original is signalled, so the Mac is never unheld between them. Every lid-closed
+    /// pre-flight applies to the replacement; if `on` refuses, nothing has changed. The
+    /// replacement carries a fresh id (see `Hold.replaces` for why) and the original's
+    /// lineage. For a moment both holds are live and `status` reports both — true, if
+    /// brief.
+    public func modify(id: String, changing modifier: HoldModifier, to value: Bool) throws -> Hold {
+        let holds = try store.read()
+        guard let original = holds.first(where: { $0.id == id }) ?? holds.first(where: { $0.replaces == id }),
+              let options = replacementOptions(for: original, changing: modifier, to: value, now: now())
+        else { throw ServiceError.holdNotFound(id) }
+        let replacement = try on(options)
+        _ = try off(id: original.id, exact: true)
+        return replacement
     }
 
     /// What an `off` call should report to the caller. `--all`'s empty result is a

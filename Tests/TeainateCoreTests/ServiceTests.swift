@@ -414,3 +414,69 @@ private func liveTable(_ pids: pid_t...) -> [pid_t: ProcessSnapshot] {
     #expect(offSelectionProblem(id: "h_1", all: false, untracked: false) == nil)
     #expect(offSelectionProblem(id: nil, all: true, untracked: true) == nil)
 }
+
+// modify is `on` then `off`: the replacement exists before the original is signalled,
+// so the Mac is never unheld in between.
+@Test func modifySpawnsReplacementBeforeTerminatingOriginal() throws {
+    let spawner = RecordingSpawner()
+    let service = makeService(spawner: spawner, snapshotter: StubSnapshotter(table: liveTable(100, 101)))
+    let original = try service.on(HoldOptions(duration: 3600, source: .menu))
+
+    let replacement = try service.modify(id: original.id, changing: .display, to: true)
+
+    #expect(spawner.spawned == [["-i", "-t", "3600"], ["-i", "-d", "-t", "3600"]])
+    #expect(spawner.terminated == [100])
+    #expect(replacement.caffeinatePID == 101)
+    #expect(replacement.id != original.id)
+    #expect(replacement.replaces == original.id)
+    #expect(replacement.display)
+    #expect(replacement.kind == .timer)
+    let drift = abs(replacement.expiresAt!.timeIntervalSince(original.expiresAt!))
+    #expect(drift < 1)
+    #expect(try service.status().holds.map(\.id) == [replacement.id])
+}
+
+@Test func refusedModifyLeavesTheOriginalUntouched() throws {
+    let spawner = RecordingSpawner()
+    let service = makeService(spawner: spawner, snapshotter: StubSnapshotter(table: liveTable(100)))
+    let original = try service.on(HoldOptions(source: .menu))
+    spawner.shouldFail = true
+
+    #expect(throws: ServiceError.spawnFailed("boom")) {
+        try service.modify(id: original.id, changing: .display, to: true)
+    }
+    #expect(spawner.terminated.isEmpty)
+    #expect(try service.status().holds.map(\.id) == [original.id])
+}
+
+@Test func modifyUnknownIDThrowsHoldNotFound() {
+    let service = makeService()
+    #expect(throws: ServiceError.holdNotFound("h_nope")) {
+        try service.modify(id: "h_nope", changing: .display, to: true)
+    }
+}
+
+@Test func offByOriginalIDReleasesTheReplacementChain() throws {
+    let spawner = RecordingSpawner()
+    let service = makeService(spawner: spawner, snapshotter: StubSnapshotter(table: liveTable(100, 101, 102)))
+    let original = try service.on(HoldOptions(source: .menu))
+    let second = try service.modify(id: original.id, changing: .display, to: true)
+    // Addressed by the original id even though only the replacement is live.
+    let third = try service.modify(id: original.id, changing: .acOnly, to: true)
+    #expect(second.replaces == original.id)
+    #expect(third.replaces == original.id)
+    #expect(third.flags == ["-s", "-d"])
+
+    let released = try service.off(id: original.id)
+    #expect(released.map(\.id) == [third.id])
+    #expect(spawner.terminated == [100, 101, 102])
+    #expect(try service.status().holds.isEmpty)
+}
+
+@Test func offByReplacementIDStillWorks() throws {
+    let spawner = RecordingSpawner()
+    let service = makeService(spawner: spawner, snapshotter: StubSnapshotter(table: liveTable(100, 101)))
+    let original = try service.on(HoldOptions(source: .menu))
+    let replacement = try service.modify(id: original.id, changing: .display, to: true)
+    #expect(try service.off(id: replacement.id).map(\.id) == [replacement.id])
+}

@@ -27,6 +27,8 @@ extension ServiceError: CustomStringConvertible {
             return "The hold failed and the sleep-disabled flag could not be cleared: \(message). Run: sudo pmset -a disablesleep 0"
         case .durationTooLong:
             return "Durations are limited to \(maxDurationDays) days."
+        case .holdNotFound(let id):
+            return "No hold with id '\(id)'. It may have already ended."
         }
     }
 }
