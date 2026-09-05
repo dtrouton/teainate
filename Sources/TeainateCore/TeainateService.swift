@@ -204,6 +204,7 @@ public struct TeainateService: Sendable {
     private let snapshotter: any ProcessSnapshotting
     private let now: @Sendable () -> Date
     private let lidClosed: LidClosedDependencies?
+    private let startTimes: any ProcessStartTimeReading
 
     public init(
         store: HoldStore,
@@ -211,7 +212,8 @@ public struct TeainateService: Sendable {
         assertionReader: any AssertionReading,
         snapshotter: any ProcessSnapshotting,
         now: @escaping @Sendable () -> Date = { Date() },
-        lidClosed: LidClosedDependencies? = nil
+        lidClosed: LidClosedDependencies? = nil,
+        startTimes: any ProcessStartTimeReading = ProcPIDInfoStartTimeReader()
     ) {
         self.store = store
         self.spawner = spawner
@@ -219,6 +221,7 @@ public struct TeainateService: Sendable {
         self.snapshotter = snapshotter
         self.now = now
         self.lidClosed = lidClosed
+        self.startTimes = startTimes
     }
 
     /// `watcherExecutable` is the CLI binary: the app passes its bundled copy, the CLI
@@ -228,8 +231,9 @@ public struct TeainateService: Sendable {
         watcherExecutable: URL? = nil
     ) -> TeainateService {
         let snapshotter = PSProcessSnapshotter()
+        let startTimes = ProcPIDInfoStartTimeReader()
         return TeainateService(
-            store: HoldStore(fileURL: paths.stateFile, snapshotter: snapshotter),
+            store: HoldStore(fileURL: paths.stateFile, snapshotter: snapshotter, startTimes: startTimes),
             spawner: SystemCaffeinateSpawner(),
             assertionReader: PMSetAssertionReader(),
             snapshotter: snapshotter,
@@ -240,7 +244,8 @@ public struct TeainateService: Sendable {
                     settings: SettingsStore(fileURL: paths.settingsFile),
                     watcherSpawner: SystemWatcherSpawner(),
                     watcherExecutable: executable, stateFile: paths.stateFile)
-            }
+            },
+            startTimes: startTimes
         )
     }
 
@@ -251,6 +256,8 @@ public struct TeainateService: Sendable {
         // Spawn first: a hold record must never describe a process that does not exist.
         let flags = caffeinateFlags(for: options)
         let pid = try spawner.spawn(flags: flags)
+        // Read before recording: a stamp taken later could belong to a recycled pid.
+        let startedAt = startTimes.startTime(of: pid)
         let started = now()
         let hold = Hold(
             id: makeHoldID(),
@@ -263,7 +270,8 @@ public struct TeainateService: Sendable {
             expiresAt: options.duration.map { started.addingTimeInterval($0) },
             watchedPID: options.watchedPID,
             display: options.display,
-            acOnly: options.acOnly
+            acOnly: options.acOnly,
+            processStartedAt: startedAt
         )
         do {
             try store.mutate { $0.append(hold) }
@@ -370,13 +378,15 @@ public struct TeainateService: Sendable {
             throw undo(error)
         }
 
+        // Read before recording: a stamp taken later could belong to a recycled pid.
+        let startedAt = startTimes.startTime(of: pid)
         let started = now()
         let hold = Hold(
             id: id, kind: options.kind, label: options.label, source: options.source,
             caffeinatePID: pid, flags: flags, startedAt: started,
             expiresAt: options.duration.map { started.addingTimeInterval($0) },
             watchedPID: options.watchedPID, display: options.display, acOnly: options.acOnly,
-            lidClosed: true, batteryFloor: floor)
+            lidClosed: true, batteryFloor: floor, processStartedAt: startedAt)
         do {
             try store.mutateState { state in
                 state.holds.append(hold)

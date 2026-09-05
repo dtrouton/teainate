@@ -79,3 +79,38 @@ private func realService() -> (TeainateService, URL) {
     // The stale record must not survive the next read.
     #expect(try service.status().holds.isEmpty)
 }
+
+// The recycling gap, closed: a record that carries process A's start time must not
+// adopt process B just because B reuses A's pid and name. We cannot force the kernel to
+// reuse a pid, so the test transplants A's stamp onto B's pid — the exact state a
+// recycled record would be in.
+@Test func realStartTimeDistinguishesTwoCaffeinateProcesses() throws {
+    let spawner = SystemCaffeinateSpawner()
+    let reader = ProcPIDInfoStartTimeReader()
+    let a = try spawner.spawn(flags: ["-i", "-t", "20"])
+    defer { spawner.terminate(pid: a) }
+    let b = try spawner.spawn(flags: ["-i", "-t", "20"])
+    defer { spawner.terminate(pid: b) }
+
+    let startA = try #require(reader.startTime(of: a))
+    let table = try PSProcessSnapshotter().snapshot()
+
+    var genuine = Hold(id: "a", kind: .timer, label: nil, source: .cli, caffeinatePID: a, flags: ["-i"],
+                       startedAt: Date(), expiresAt: nil, watchedPID: nil, display: false, acOnly: false)
+    genuine.processStartedAt = startA
+    #expect(reconcile([genuine], against: table, startTime: reader.startTime(of:)).map(\.id) == ["a"])
+
+    var recycled = genuine
+    recycled.id = "recycled"
+    recycled.caffeinatePID = b                    // b's pid, a's start time
+    #expect(reconcile([recycled], against: table, startTime: reader.startTime(of:)).isEmpty)
+}
+
+@Test func realServiceRecordsStartTimeAndSurvivesReads() throws {
+    let (service, _) = realService()
+    let hold = try service.on(HoldOptions(duration: 20, source: .cli))
+    defer { _ = try? service.off(id: nil) }
+    #expect(hold.processStartedAt != nil)
+    #expect(hold.processStartedAt == ProcPIDInfoStartTimeReader().startTime(of: hold.caffeinatePID))
+    #expect(try service.status().holds.map(\.id) == [hold.id])
+}

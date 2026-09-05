@@ -28,15 +28,31 @@ private struct StubAssertions: AssertionReading {
     func assertions() throws -> [ForeignAssertion] { value }
 }
 
+private struct StubStartTimes: ProcessStartTimeReading {
+    var times: [pid_t: ProcessStartTime]
+    func startTime(of pid: pid_t) -> ProcessStartTime? { times[pid] }
+}
+
 private func makeService(
     spawner: RecordingSpawner = RecordingSpawner(),
     snapshotter: StubSnapshotter = StubSnapshotter(table: [:]),
     assertions: StubAssertions = StubAssertions(),
-    now: Date = Date(timeIntervalSince1970: 1_000_000)
+    now: Date = Date(timeIntervalSince1970: 1_000_000),
+    startTimes: (any ProcessStartTimeReading)? = nil
 ) -> TeainateService {
     let url = FileManager.default.temporaryDirectory
         .appendingPathComponent("teainate-svc-\(UUID().uuidString)")
         .appendingPathComponent("holds.json")
+    if let startTimes {
+        return TeainateService(
+            store: HoldStore(fileURL: url, snapshotter: snapshotter, startTimes: startTimes),
+            spawner: spawner,
+            assertionReader: assertions,
+            snapshotter: snapshotter,
+            now: { now },
+            startTimes: startTimes
+        )
+    }
     return TeainateService(
         store: HoldStore(fileURL: url, snapshotter: snapshotter),
         spawner: spawner,
@@ -318,6 +334,25 @@ private func liveTable(_ pids: pid_t...) -> [pid_t: ProcessSnapshot] {
     _ = try service.off(id: nil)
 
     #expect(spawner.terminated == [100])             // never 555
+}
+
+@Test func onRecordsTheSpawnedProcessStartTime() throws {
+    let t = ProcessStartTime(seconds: 1_000, microseconds: 7)
+    let service = makeService(snapshotter: StubSnapshotter(table: liveTable(100)),
+                              startTimes: StubStartTimes(times: [100: t]))
+    let hold = try service.on(HoldOptions(source: .cli))
+    #expect(hold.processStartedAt == t)
+    #expect(try service.status().holds.map(\.id) == [hold.id])
+}
+
+@Test func holdWhoseProcessDiedInstantlyIsStillRecordedThenReconciledAway() throws {
+    // startTime returns nil right after spawn: record without a stamp; the next read
+    // drops it by pid/name as before.
+    let service = makeService(snapshotter: StubSnapshotter(table: [:]),
+                              startTimes: StubStartTimes(times: [:]))
+    let hold = try service.on(HoldOptions(source: .cli))
+    #expect(hold.processStartedAt == nil)
+    #expect(try service.status().holds.isEmpty)
 }
 
 @Test func statusEncodesSnakeCaseJSON() throws {
