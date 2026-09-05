@@ -18,10 +18,11 @@ public func expectedProcessName(for hold: Hold) -> String {
 /// A record without a start time (written before 0.2.1) matches by name only.
 /// This is what lets a plain file be a safe source of truth: a stale record can exist
 /// after a crash, but never survives the next read.
+/// Required, not defaulted: an omitted reader would drop every stamped hold.
 public func reconcile(
     _ holds: [Hold],
     against table: [pid_t: ProcessSnapshot],
-    startTime: (pid_t) -> ProcessStartTime? = { _ in nil }
+    startTime: (pid_t) -> ProcessStartTime?
 ) -> [Hold] {
     holds.filter { hold in
         guard table[hold.caffeinatePID]?.command == expectedProcessName(for: hold) else { return false }

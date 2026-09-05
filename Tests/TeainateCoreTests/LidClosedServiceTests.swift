@@ -72,6 +72,11 @@ private struct StubAssertions: AssertionReading {
     func assertions() throws -> [ForeignAssertion] { value }
 }
 
+private struct StubStartTimes: ProcessStartTimeReading {
+    var times: [pid_t: ProcessStartTime]
+    func startTime(of pid: pid_t) -> ProcessStartTime? { times[pid] }
+}
+
 /// A mutable time source the Rig's `now` closure captures by reference, so a test can
 /// advance the clock (e.g. past `lidFlagGracePeriod`) after the service is constructed.
 private final class Clock: @unchecked Sendable {
@@ -91,20 +96,28 @@ private struct Rig {
     init(grant: Bool = true, battery: BatteryState? = BatteryState(source: .ac, percent: 90),
          table: [pid_t: ProcessSnapshot] = Rig.table((100, "teainate")),
          storeSnapshotter: (any ProcessSnapshotting)? = nil,
-         foreign: [ForeignAssertion] = []) {
+         foreign: [ForeignAssertion] = [],
+         // Never the real ProcPIDInfoStartTimeReader: RecordingWatcherSpawner starts
+         // its pids at 100, which does not correspond to any real process on the host
+         // running this test, so a real reader would silently and non-deterministically
+         // decide whether the test exercises the legacy name-only reconciliation path
+         // or the stamped one. Defaulting to an explicit empty stub keeps the suite
+         // hermetic and deterministic.
+         startTimes: any ProcessStartTimeReading = StubStartTimes(times: [:])) {
         let dir = FileManager.default.temporaryDirectory.appendingPathComponent("teainate-lid-\(UUID().uuidString)")
         stateFile = dir.appendingPathComponent("holds.json")
         settings = SettingsStore(fileURL: dir.appendingPathComponent("settings.json"))
         let snap = StubSnapshotter(table: table)
         let clock = self.clock
         service = TeainateService(
-            store: HoldStore(fileURL: stateFile, snapshotter: storeSnapshotter ?? snap, now: { clock.time }),
+            store: HoldStore(fileURL: stateFile, snapshotter: storeSnapshotter ?? snap, startTimes: startTimes, now: { clock.time }),
             spawner: spawner, assertionReader: StubAssertions(value: foreign), snapshotter: snap,
             now: { clock.time },
             lidClosed: LidClosedDependencies(
                 flag: flag, grant: FakeGrant(granted: grant), battery: StubBattery(state: battery),
                 settings: settings, watcherSpawner: watcher,
-                watcherExecutable: URL(fileURLWithPath: "/usr/local/bin/teainate"), stateFile: stateFile)
+                watcherExecutable: URL(fileURLWithPath: "/usr/local/bin/teainate"), stateFile: stateFile),
+            startTimes: startTimes
         )
     }
 
@@ -181,6 +194,20 @@ private struct Rig {
     let state = try HoldStore(fileURL: rig.stateFile, snapshotter: StubSnapshotter(table: Rig.table((100, "teainate")))).readState()
     #expect(state.lidFlagOwned == true)
     #expect(state.holds.map(\.id) == [hold.id])
+}
+
+// The lid-closed hold's recorded pid is the watcher, not caffeinate (see CLAUDE.md's
+// "ucomm is teainate, not caffeinate" trap) — this proves the stamped-start-time path
+// round-trips through that watcher pid too, not just the ordinary caffeinate path
+// covered by ServiceTests.onRecordsTheSpawnedProcessStartTime.
+@Test func lidClosedHoldSurvivesReconciliationWithAStampedStartTime() throws {
+    let stamp = ProcessStartTime(seconds: 2_000, microseconds: 5)
+    let rig = Rig(startTimes: StubStartTimes(times: [100: stamp]))
+
+    let hold = try rig.service.on(rig.lid())
+
+    #expect(hold.processStartedAt == stamp)
+    #expect(try rig.service.status().holds.map(\.id) == [hold.id])
 }
 
 @Test func recordingTheHoldClearsThePendingStamp() throws {

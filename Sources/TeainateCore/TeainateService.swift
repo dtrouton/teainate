@@ -141,7 +141,7 @@ public struct LidClosedStatus: Codable, Sendable, Equatable {
     }
 
     public static let unavailable = LidClosedStatus(
-        enabled: false, flagSet: false, flagSetBy: nil,
+        enabled: false, flagSet: nil, flagSetBy: nil,
         batteryFloor: defaultBatteryFloor, lastEnded: nil, warnings: [])
 }
 

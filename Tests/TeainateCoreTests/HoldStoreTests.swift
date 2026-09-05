@@ -77,19 +77,22 @@ private func stamped(_ id: String, pid: pid_t, startedAt: ProcessStartTime?) -> 
     #expect(try recycled.read().isEmpty)
 }
 
+// These records carry no start time, so reconciliation falls back to name-only
+// matching regardless of what the reader returns — `{ _ in nil }` here is standing in
+// for "no reader consulted", not "reader unavailable".
 @Test func reconcileKeepsLiveCaffeinateHolds() {
-    let kept = reconcile([hold("a", pid: 100)], against: table((100, "caffeinate")))
+    let kept = reconcile([hold("a", pid: 100)], against: table((100, "caffeinate")), startTime: { _ in nil })
     #expect(kept.map(\.id) == ["a"])
 }
 
 @Test func reconcileDropsDeadPIDs() {
-    let kept = reconcile([hold("a", pid: 100)], against: table((200, "caffeinate")))
+    let kept = reconcile([hold("a", pid: 100)], against: table((200, "caffeinate")), startTime: { _ in nil })
     #expect(kept.isEmpty)
 }
 
 @Test func reconcileDropsRecycledPIDs() {
     // PID alive but no longer caffeinate — the number was reused.
-    let kept = reconcile([hold("a", pid: 100)], against: table((100, "Safari")))
+    let kept = reconcile([hold("a", pid: 100)], against: table((100, "Safari")), startTime: { _ in nil })
     #expect(kept.isEmpty)
 }
 
@@ -99,19 +102,20 @@ private func lidHold(_ id: String, pid: pid_t) -> Hold {
     return h
 }
 
+// Name-only matching again: none of these three records carry a start time.
 @Test func reconcileKeepsLidClosedHoldWhosePIDIsTheWatcher() {
-    let kept = reconcile([lidHold("l", pid: 100)], against: table((100, "teainate")))
+    let kept = reconcile([lidHold("l", pid: 100)], against: table((100, "teainate")), startTime: { _ in nil })
     #expect(kept.map(\.id) == ["l"])
 }
 
 @Test func reconcileDropsLidClosedHoldWhosePIDIsNowCaffeinate() {
     // A watcher's pid recycled by a bare caffeinate is not our watcher.
-    let kept = reconcile([lidHold("l", pid: 100)], against: table((100, "caffeinate")))
+    let kept = reconcile([lidHold("l", pid: 100)], against: table((100, "caffeinate")), startTime: { _ in nil })
     #expect(kept.isEmpty)
 }
 
 @Test func reconcileDropsOrdinaryHoldWhosePIDIsNowTeainate() {
-    let kept = reconcile([hold("a", pid: 100)], against: table((100, "teainate")))
+    let kept = reconcile([hold("a", pid: 100)], against: table((100, "teainate")), startTime: { _ in nil })
     #expect(kept.isEmpty)
 }
 
@@ -191,7 +195,7 @@ private func lidHold(_ id: String, pid: pid_t) -> Hold {
     let snapshot = try PSProcessSnapshotter().snapshot()
     #expect(snapshot[pid]?.command == "caffeinate")
 
-    let kept = reconcile([hold("a", pid: pid)], against: snapshot)
+    let kept = reconcile([hold("a", pid: pid)], against: snapshot, startTime: ProcPIDInfoStartTimeReader().startTime(of:))
     #expect(kept.map(\.id) == ["a"])
 }
 
@@ -213,6 +217,8 @@ private func lidHold(_ id: String, pid: pid_t) -> Hold {
     #expect(state.lidFlagOwned == false)
     #expect(state.lidFlagPendingSince == nil)
     #expect(state.lastEnded == nil)
+    // A legacy-but-valid file must never trip the corrupt-file reset warning.
+    #expect(state.stateResetAt == nil)
 }
 
 @Test func statePersistsAsObjectWithMarkerAndLastEnded() throws {

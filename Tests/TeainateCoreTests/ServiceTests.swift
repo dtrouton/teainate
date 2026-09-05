@@ -38,27 +38,25 @@ private func makeService(
     snapshotter: StubSnapshotter = StubSnapshotter(table: [:]),
     assertions: StubAssertions = StubAssertions(),
     now: Date = Date(timeIntervalSince1970: 1_000_000),
-    startTimes: (any ProcessStartTimeReading)? = nil
+    // Never the real ProcPIDInfoStartTimeReader: the fake process table's pids
+    // (RecordingSpawner starts at 100) don't correspond to real processes on the
+    // host, so a real reader would return nil unpredictably — or, worse, a stale
+    // one that happens to match, silently switching the test onto whichever of the
+    // legacy name-only or stamped reconciliation path the host's process table
+    // decides. Defaulting to an explicit empty stub makes every test that doesn't
+    // care about start times deterministically exercise the legacy path.
+    startTimes: any ProcessStartTimeReading = StubStartTimes(times: [:])
 ) -> TeainateService {
     let url = FileManager.default.temporaryDirectory
         .appendingPathComponent("teainate-svc-\(UUID().uuidString)")
         .appendingPathComponent("holds.json")
-    if let startTimes {
-        return TeainateService(
-            store: HoldStore(fileURL: url, snapshotter: snapshotter, startTimes: startTimes),
-            spawner: spawner,
-            assertionReader: assertions,
-            snapshotter: snapshotter,
-            now: { now },
-            startTimes: startTimes
-        )
-    }
     return TeainateService(
-        store: HoldStore(fileURL: url, snapshotter: snapshotter),
+        store: HoldStore(fileURL: url, snapshotter: snapshotter, startTimes: startTimes),
         spawner: spawner,
         assertionReader: assertions,
         snapshotter: snapshotter,
-        now: { now }
+        now: { now },
+        startTimes: startTimes
     )
 }
 

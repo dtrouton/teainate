@@ -50,7 +50,7 @@ private func tempState() -> URL {
     let record = Hold(id: "h_it", kind: .timer, label: nil, source: .cli, caffeinatePID: pid,
                       flags: ["-i", "-t", "20"], startedAt: Date(), expiresAt: nil, watchedPID: nil,
                       display: false, acOnly: false, lidClosed: true, batteryFloor: 15)
-    #expect(reconcile([record], against: table).map(\.id) == ["h_it"])
+    #expect(reconcile([record], against: table, startTime: ProcPIDInfoStartTimeReader().startTime(of:)).map(\.id) == ["h_it"])
     #expect(ownedPIDs(of: [record], in: table).contains(child!.pid))
 
     kill(pid, SIGTERM)

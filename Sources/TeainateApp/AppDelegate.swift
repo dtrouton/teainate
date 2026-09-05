@@ -94,7 +94,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 source: .menu
             ))
         } catch {
-            present(error: "Could not start the hold.", detail: error.localizedDescription)
+            present(error: "Could not start the hold.", detail: "\(error)")
         }
     }
 

@@ -43,9 +43,6 @@ hold whose caffeinate has already exited.
 - **`On.validate()` hand-rolls duration error text via `ValidationError`**,
   duplicating the messages `Errors.swift` already builds. One source of truth
   would keep them from drifting apart.
-- **`ProcPIDInfoStartTimeReader` converts `pbi_start_tvusec` with `Int32(_:)`**,
-  which traps on an out-of-range value; `Int32(clamping:)` would be safer for a
-  field read from the kernel rather than validated input.
 - **A process-kind hold cannot say which process it is watching.** `watched_pid`
   is recorded but never surfaced, so "until session exits" is all the user gets.
 - **Long holds render in minutes.** A 30-day hold reads `43200 min left`.
