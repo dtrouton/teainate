@@ -179,8 +179,18 @@ private func fakeCLI(in paths: TeainatePaths) throws -> URL {
 // found" — in the one example whose whole point is that a non-zero exit is trustworthy.
 @Test func skillNeverShowsABareTeainateInvocation() {
     let text = renderSkillTemplate(cliPath: "/x/teainate")
-    for line in text.split(separator: "\n") where line.contains("teainate on") {
-        #expect(!line.contains("`teainate on"), "bare invocation: \(line)")
-        #expect(!line.hasPrefix("teainate on"), "bare invocation: \(line)")
+    // Any `teainate <subcommand>` not preceded by the substituted path is a bare invocation.
+    let bare = try! NSRegularExpression(pattern: #"(?<![/\w])teainate (on|off|status)\b"#)
+    for line in text.split(separator: "\n") {
+        let string = String(line)
+        let hit = bare.firstMatch(in: string, range: NSRange(string.startIndex..., in: string))
+        #expect(hit == nil, "bare invocation: \(line)")
     }
+}
+
+// foreign_assertions deliberately omits processes already listed under untracked_caffeinate;
+// an agent that reads only the first list must be told the second is required reading.
+@Test func skillSaysUntrackedCaffeinateIsExcludedFromForeignAssertions() {
+    let text = renderSkillTemplate(cliPath: "/x/teainate")
+    #expect(text.contains("excluded from `foreign_assertions`"))
 }

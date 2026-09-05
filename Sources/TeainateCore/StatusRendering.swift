@@ -105,8 +105,9 @@ private func defaultLabel(for hold: HoldStatus) -> String {
 }
 
 /// Minutes under an hour, hours and minutes under two days, days and hours beyond.
-/// Zero trailing units are dropped ("2 h", not "2 h 0 min"). Rounds the smallest
-/// unit shown, so a hold never reads as spent while seconds remain.
+/// Zero trailing units are dropped ("2 h", not "2 h 0 min"). Minutes are rounded;
+/// hours and days truncate, so a long hold under-reports slightly rather than
+/// claiming time it does not have, and nothing ever reads as spent while it lasts.
 func remainingLabel(seconds: Int) -> String {
     if seconds < 60 { return "less than a minute" }
     let minutes = Int((Double(seconds) / 60).rounded())

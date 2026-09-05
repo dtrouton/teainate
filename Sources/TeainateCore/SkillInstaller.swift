@@ -137,10 +137,12 @@ Returns `awake`, the list of `holds` teainate owns, `foreign_assertions` (other
 processes holding the Mac awake, from `pmset`), and `untracked_caffeinate`
 (`caffeinate` processes teainate did not start, with their command lines).
 
-When the user asks "why won't my Mac sleep?", check `foreign_assertions` first — the
-answer is often another app, not teainate. `untracked_caffeinate` carries each
-process's actual flags, which `pmset` cannot report, so it is the better place to
-look when the culprit is a stray `caffeinate`.
+When the user asks "why won't my Mac sleep?", read both `foreign_assertions` and
+`untracked_caffeinate` — the answer is often another app, not teainate. Stray
+`caffeinate` processes are excluded from `foreign_assertions` and appear only under
+`untracked_caffeinate`, which carries each process's actual flags (something `pmset`
+cannot report); an empty `foreign_assertions` therefore does not mean nothing else is
+holding the Mac awake.
 
 If `pmset_available` is false, `foreign_assertions` is empty because `pmset` could
 not be read, not because nothing else is holding the Mac awake — say so rather than
